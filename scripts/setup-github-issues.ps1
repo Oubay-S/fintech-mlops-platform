@@ -3,34 +3,9 @@
 $repo = "Oubay-S/fintech-mlops-platform"
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
-Write-Host "=== 1. Creating Labels ==="
-$labels = @(
-    @{ name = "role-1"; color = "0075ca"; description = "Role 1: Backend (Spring Boot)" },
-    @{ name = "role-2"; color = "7057ff"; description = "Role 2: Frontend & Delivery" },
-    @{ name = "role-3"; color = "d93f0b"; description = "Role 3: DevOps / MLOps" },
-    @{ name = "role-4"; color = "0e8a16"; description = "Role 4: ML Training" },
-    @{ name = "role-5"; color = "fbca04"; description = "Role 5: ML Serving" }
-)
-
-foreach ($l in $labels) {
-    gh label create $l.name --repo $repo --color $l.color --description $l.description --force 2>&1 | Out-Null
-    Write-Host "Label created: $($l.name)"
-}
-
-Write-Host "`n=== 2. Creating Milestones ==="
-$m1Body = '{"title":"Month 1 (Oct 7 - Nov 7, 2026): Foundations","description":"Service skeletons, JWT auth, local cluster, initial ML benchmark, FastAPI stub","due_on":"2026-11-07T23:59:59Z"}'
-$m2Body = '{"title":"Month 2 (Nov 8 - Dec 7, 2026): Integration","description":"Real model integrated, K8s multi-services, HPA, Prometheus/Grafana, embeddings React","due_on":"2026-12-07T23:59:59Z"}'
-$m3Body = '{"title":"Month 3 (Dec 8, 2026 - Jan 10, 2027): Hardening & Delivery","description":"Load testing (Locust), pod-kill chaos, full CI/CD with rollback, README report, demo video","due_on":"2027-01-10T23:59:59Z"}'
-
-$m1 = ($m1Body | gh api --method POST repos/$repo/milestones --input - | ConvertFrom-Json).number
-$m2 = ($m2Body | gh api --method POST repos/$repo/milestones --input - | ConvertFrom-Json).number
-$m3 = ($m3Body | gh api --method POST repos/$repo/milestones --input - | ConvertFrom-Json).number
-
-Write-Host "Milestone 1 ID: $m1"
-Write-Host "Milestone 2 ID: $m2"
-Write-Host "Milestone 3 ID: $m3"
-
-Write-Host "`n=== 3. Creating Issues ==="
+$m1 = "Month 1 (Oct 7 - Nov 7, 2026): Foundations"
+$m2 = "Month 2 (Nov 8 - Dec 7, 2026): Integration"
+$m3 = "Month 3 (Dec 8, 2026 - Jan 10, 2027): Hardening & Delivery"
 
 $issues = @(
     # --- Role 1 ---
@@ -78,9 +53,16 @@ $issues = @(
     @{ title = "[Role 5] Write contract and integration tests between Spring Boot Risk service and FastAPI"; milestone = $m3; label = "role-5"; body = "Author automated integration tests validating schema consistency and error handling between Risk service and FastAPI." }
 )
 
+# Fetch existing issues titles to avoid duplicates
+$existing = (gh issue list --repo $repo --limit 100 --json title | ConvertFrom-Json).title
+
 foreach ($i in $issues) {
-    gh issue create --repo $repo --title $i.title --body $i.body --label $i.label --milestone $i.milestone 2>&1 | Out-Null
+    if ($existing -contains $i.title) {
+        Write-Host "Already exists: $($i.title)"
+        continue
+    }
+    gh issue create --repo $repo --title $i.title --body $i.body --label $i.label --milestone $i.milestone
     Write-Host "Created: $($i.title)"
 }
 
-Write-Host "`nAll 34 issues created successfully!"
+Write-Host "`nAll issues verified and created!"
