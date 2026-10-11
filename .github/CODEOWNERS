@@ -1,0 +1,38 @@
+# CODEOWNERS — GitHub auto-assigns reviewers based on file paths
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# ===========================
+# DevOps / MLOps (Role 3) — @Oubay-S
+# ===========================
+.github/                @Oubay-S
+k8s/                    @Oubay-S
+infra/                  @Oubay-S
+scripts/                @Oubay-S
+docker-compose.yml      @Oubay-S
+Makefile                @Oubay-S
+
+# ===========================
+# Backend (Role 1) — TO FILL
+# ===========================
+# services/              @pseudo-role1
+
+# ===========================
+# Frontend & Delivery (Role 2) — TO FILL
+# ===========================
+# frontend/              @pseudo-role2
+# README.md              @pseudo-role2
+# docs/readme-sections/  @pseudo-role2
+
+# ===========================
+# ML Training (Role 4) — TO FILL
+# ===========================
+# ml/common/             @pseudo-role4
+# ml/training/           @pseudo-role4
+# ml/visualization/      @pseudo-role4
+# ml/load-tests/         @pseudo-role4
+
+# ===========================
+# ML Serving (Role 5) — TO FILL
+# ===========================
+# ml/pipeline/           @pseudo-role5
+# ml/serving/            @pseudo-role5
