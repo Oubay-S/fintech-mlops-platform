@@ -1,20 +1,20 @@
-# Makefile — FinTech MLOps Platform (dev local)
-# Usage: make up | make down | make logs
+# Makefile — FinTech MLOps Platform (Local Development)
+# Usage: make up | make down | make logs | make ps
 
 .PHONY: up down logs ps
 
-## Lancer l'infra de dev (Postgres, MinIO, MLflow)
+## Start local development stack (Postgres, MinIO, MLflow)
 up:
 	docker compose up -d
 
-## Arrêter l'infra de dev
+## Stop local development stack
 down:
 	docker compose down
 
-## Voir les logs en temps réel
+## Follow logs in real time
 logs:
 	docker compose logs -f
 
-## État des conteneurs
+## Check container status
 ps:
 	docker compose ps

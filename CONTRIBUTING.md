@@ -1,65 +1,65 @@
-# Contributing — FinTech MLOps Platform
+# Contributing Guidelines — FinTech MLOps Platform
 
-## Branches
+## Branching Strategy
 
-- `main` est **protégée** : pas de push direct.
-- Crée une branche depuis `main` avec le format :
+- The `main` branch is **protected**: direct pushes are prohibited.
+- Always branch off `main` using the following naming standard:
   ```
-  feat/<rôle>-<sujet>
+  feat/<role>-<topic>
   ```
-  Exemples :
+  Examples:
   - `feat/role1-auth-service`
   - `feat/role3-kube-manifests`
   - `feat/role4-xgboost-benchmark`
   - `feat/role5-fastapi-serving`
 
-## Commits — Conventional Commits
+## Commit Messages — Conventional Commits
 
-Utilise le format [Conventional Commits](https://www.conventionalcommits.org/) :
+We follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
 
 ```
 <type>(<scope>): <description>
 ```
 
-Types courants :
-| Type       | Usage                                    |
+Common types:
+| Type       | Description                              |
 |------------|------------------------------------------|
-| `feat`     | Nouvelle fonctionnalité                  |
-| `fix`      | Correction de bug                        |
-| `docs`     | Documentation uniquement                 |
-| `ci`       | CI/CD, workflows GitHub Actions          |
-| `refactor` | Refactoring sans changement fonctionnel  |
-| `test`     | Ajout ou modification de tests           |
-| `chore`    | Maintenance (dépendances, config, etc.)  |
+| `feat`     | A new feature                            |
+| `fix`      | A bug fix                                |
+| `docs`     | Documentation changes only               |
+| `ci`       | CI/CD workflows and pipelines            |
+| `refactor` | Code refactoring without behavior change |
+| `test`     | Adding or updating tests                 |
+| `chore`    | Build tasks, dependencies, configs       |
 
-Exemples :
+Examples:
 ```
 feat(auth): add JWT token validation
-fix(risk): handle null probability from /predict
+fix(risk): handle null probability response from /predict
 ci(backend): add SonarCloud analysis step
 docs(readme): add architecture diagram
 ```
 
-## Pull Requests
+## Pull Requests (PR)
 
-- **Une PR par fonctionnalité** (pas de PR géantes multi-sujets).
-- Remplis le template de PR (description, type, checklist).
-- Au moins **1 review** avant le merge.
-- Le reviewer vérifie :
-  - Pas de secrets dans le code
-  - Build et tests passent
-  - La documentation est à jour
+- **One PR per feature** (avoid large monolithic PRs spanning multiple components).
+- Fill out the PR template thoroughly (description, type, checklist).
+- Require at least **1 peer review approval** before merging.
+- Reviewer verification checklist:
+  - Zero secrets or sensitive data in code or configuration
+  - Build passes and all tests succeed
+  - Relevant documentation is up to date
 
-## Secrets
+## Secrets & Security
 
-- **JAMAIS** de mot de passe, token ou clé dans le code.
-- Utilise `.env` (non commité) + `.env.example` (commité avec des valeurs factices).
-- Les secrets Kubernetes réels sont créés en local, pas dans Git.
+- **NEVER** commit real passwords, tokens, private keys, or credentials.
+- Use local `.env` (git-ignored) with reference in `.env.example` (committed with dummy values).
+- Kubernetes real secrets must be generated locally or injected securely in CI/CD, never stored in Git.
 
-## Images Docker
+## Docker Image Requirements
 
-Chaque service doit respecter la [checklist d'image](docs/conventions.md) :
-1. Démarre avec une seule commande
-2. Port documenté
-3. `/health` et `/metrics` exposés
-4. Configuration via variables d'environnement uniquement
+Every containerized service must adhere to the [Service Image Checklist](docs/conventions.md):
+1. Starts cleanly with a single command.
+2. Listens on a documented, dedicated port.
+3. Exposes `/health` and `/metrics` endpoints (`/actuator/health` and `/actuator/prometheus` for Spring Boot).
+4. Configured purely through environment variables with zero hardcoded credentials.

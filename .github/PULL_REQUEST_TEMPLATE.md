@@ -1,34 +1,34 @@
 ## Description
 
-<!-- Décris ce que fait cette PR en 2-3 phrases. -->
+<!-- Describe what this PR does in 2-3 sentences. -->
 
-## Type de changement
+## Type of Change
 
-- [ ] 🐛 Bug fix
-- [ ] ✨ Nouvelle fonctionnalité
+- [ ] 🐛 Bug fix (non-breaking change which fixes an issue)
+- [ ] ✨ New feature (non-breaking change which adds functionality)
 - [ ] 🔧 Infra / DevOps / CI-CD
 - [ ] 📝 Documentation
-- [ ] ♻️ Refactoring
-- [ ] 🧪 Tests
+- [ ] ♻️ Refactoring (no functional changes)
+- [ ] 🧪 Tests (adding missing tests or fixing existing tests)
 
-## Rôle concerné
+## Role Concerned
 
-- [ ] Rôle 1 — Backend
-- [ ] Rôle 2 — Frontend & Livraison
-- [ ] Rôle 3 — DevOps / MLOps
-- [ ] Rôle 4 — ML Training
-- [ ] Rôle 5 — ML Serving
+- [ ] Role 1 — Backend (Spring Boot)
+- [ ] Role 2 — Frontend & Delivery
+- [ ] Role 3 — DevOps / MLOps
+- [ ] Role 4 — ML Training
+- [ ] Role 5 — ML Serving
 
-## Checklist
+## Quality & Security Checklist
 
-- [ ] Le build passe (`mvn verify` / `pytest` / `npm run build`)
-- [ ] Les tests passent
-- [ ] Aucun secret, mot de passe ou token dans le code
-- [ ] La documentation est mise à jour si nécessaire
-- [ ] Les Conventional Commits sont respectés
-- [ ] L'image Docker démarre avec une seule commande (si applicable)
-- [ ] `/health` et `/metrics` fonctionnent (si applicable)
+- [ ] Build succeeds (`mvn verify` / `pytest` / `npm run build`)
+- [ ] All unit and integration tests pass
+- [ ] Zero secrets, passwords, or API tokens committed
+- [ ] Documentation updated if applicable
+- [ ] Conventional Commits format followed
+- [ ] Docker image starts with a single command (if applicable)
+- [ ] `/health` and `/metrics` endpoints working (if applicable)
 
-## Captures d'écran (si UI)
+## Screenshots / Evidence (if applicable)
 
-<!-- Ajoute des captures si la PR touche au frontend ou à Grafana. -->
+<!-- Add screenshots for frontend UI changes, Grafana dashboards, or terminal test runs. -->

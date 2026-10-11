@@ -1,26 +1,26 @@
 ---
-name: Tâche de développement
-about: Créer une tâche pour un rôle spécifique
-title: "[RôleX] "
+name: Development Task
+about: Track a feature or infrastructure task for a specific team role
+title: "[RoleX] "
 labels: ''
 assignees: ''
 ---
 
 ## Description
 
-<!-- Décris la tâche en 2-3 phrases. -->
+<!-- Describe the task in 2-3 sentences. -->
 
-## Critère de fin (Definition of Done)
+## Definition of Done (DoD)
 
-- [ ] Le code est dans une branche `feat/<rôle>-<sujet>`
-- [ ] Les tests passent
-- [ ] La PR est approuvée et mergée
-- [ ] La documentation est mise à jour
+- [ ] Code implemented in a dedicated branch `feat/<role>-<topic>`
+- [ ] Automated tests passing
+- [ ] Pull Request reviewed, approved, and merged
+- [ ] Documentation updated
 
-## Rôle assigné
+## Assigned Role
 
-<!-- Indique le rôle (1-5) et le membre responsable. -->
+<!-- Specify the role (Role 1 to Role 5) and assignee. -->
 
-## Dépendances
+## Dependencies & Handoffs
 
-<!-- Liste les tâches ou livrables d'autres rôles nécessaires. -->
+<!-- List deliverables required from other roles before completing this task. -->
