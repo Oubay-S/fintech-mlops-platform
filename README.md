@@ -102,9 +102,11 @@ For detailed guidance, see [docs/local-dev.md](docs/local-dev.md).
 
 ---
 
-## 📏 Engineering Standards & Conventions
+## 📏 Engineering Standards & Team Workflow
 
-Refer to [docs/conventions.md](docs/conventions.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Issues & PR Workflow:** [docs/workflow-guide.md](docs/workflow-guide.md) — Step-by-step guide on picking issues, branching, and linking PRs (`Closes #ID`).
+- **Engineering Conventions:** [docs/conventions.md](docs/conventions.md) — Network ports, Docker images standard, health probes, and Week 1 decisions.
+- **Contributing Guidelines:** [CONTRIBUTING.md](CONTRIBUTING.md) — Git commit standards, branch naming, and security requirements.
 
 ---
 

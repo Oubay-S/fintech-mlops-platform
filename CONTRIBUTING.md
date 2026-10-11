@@ -1,5 +1,7 @@
 # Contributing Guidelines — FinTech MLOps Platform
 
+> 📘 **New to GitHub Issues and PRs?** Check our comprehensive step-by-step [Team Workflow Guide](docs/workflow-guide.md) to learn how to pick an issue, branch, commit, and link PRs with `Closes #ID`.
+
 ## Branching Strategy
 
 - The `main` branch is **protected**: direct pushes are prohibited.
