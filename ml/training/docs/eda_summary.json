@@ -1,0 +1,18 @@
+{
+  "rows": 6362620,
+  "columns": 11,
+  "missing_cells": 0,
+  "duplicate_rows": 0,
+  "fraud": 8213,
+  "fraud_rate_pct": 0.1291,
+  "rule_rows": 8034,
+  "rule_frauds": 8034,
+  "rule_precision_pct": 100.0,
+  "rule_coverage_pct": 97.82,
+  "balance_consistent_pct": 20.19,
+  "unique_name_orig": 6353307,
+  "name_orig_once_pct": 99.85,
+  "unique_name_dest": 2722362,
+  "flagged_rows": 16,
+  "flagged_actual_frauds": 16
+}

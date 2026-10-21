@@ -57,6 +57,7 @@ Thumbs.db
 # ===========================
 *.csv
 *.tsv
+*.parquet
 data/
 !k8s/data/
 !k8s/data/.gitkeep

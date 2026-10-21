@@ -1,0 +1,54 @@
+# ML — PaySim fraud detection (Role 4)
+
+This folder contains the ML Training deliverables. **Role 4 owns `ml/common/`, `ml/training/`, `ml/visualization/`, `ml/load-tests/`.** Role 5 owns `ml/serving/` and `ml/pipeline/`.
+
+## Structure
+
+```
+ml/
+├── common/            # shared preprocessing + loading (used by training AND serving)
+│   ├── paths.py       # dataset path resolution (PAYSIM_PATH override)
+│   ├── schema.py      # column/contract definitions + validation
+│   ├── loading.py     # Parquet loader
+│   └── preprocessing.py  # contract mapping, derived features, temporal split
+├── training/
+│   ├── eda/           # exploratory analysis scripts
+│   ├── docs/          # EDA report, figures, dataset decision note
+│   └── tests/         # pytest for the shared module (drift guard)
+├── visualization/     # PCA / t-SNE / UMAP exports (Role 4)
+├── load-tests/        # Locust scenarios (Role 4)
+├── serving/           # Role 5
+├── pipeline/          # Role 5
+├── data/              # LOCAL ONLY, git-ignored
+│   └── paysim/        # paysim.parquet, sample, raw/
+└── requirements.txt
+```
+
+## Data
+
+The data is **local and git-ignored** (`data/`, `*.csv`, `*.parquet` in the root `.gitignore`).
+
+- `ml/data/paysim/paysim.parquet` — full dataset (6,362,620 rows, ~210 MB)
+- `ml/data/paysim/paysim_sample_200k.parquet` — 200k stratified sample (258 frauds)
+- `ml/data/paysim/raw/PS_20174392719_1491204439457_log.csv` — original file
+
+To use a different location, set `PAYSIM_PATH=/path/to/paysim.parquet` (full) or `PAYSIM_DATA_DIR` (folder containing both Parquet files).
+
+## Commands
+
+From the repository root:
+
+```bash
+# first EDA pass: stats + figures + report
+python -m ml.training.eda.eda_profile
+
+# tests for the shared module
+pytest ml/training/tests -q
+```
+
+## Rules
+
+- Never commit datasets or model binaries; use the Parquet cache and MLflow artifacts.
+- The shared preprocessing module (`ml/common/preprocessing.py`) is the single implementation used by training and serving — keep it in sync.
+- Contract features are the six fields from `FEATURE_LIST_V1.md`; `isFlaggedFraud`, `step`, and account IDs are never features.
+- Feature work must be computable at decision time from the contract fields.
