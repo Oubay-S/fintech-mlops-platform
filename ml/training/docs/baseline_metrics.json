@@ -1,0 +1,90 @@
+{
+  "dataset": "full",
+  "rows": 6362620,
+  "split": {
+    "fit_rows": 4072076,
+    "calibration_rows": 1018020,
+    "test_rows": 1272524,
+    "fit_fraud_rate": 0.001290742117779727,
+    "calibration_fraud_rate": 0.001290740849885071,
+    "test_fraud_rate": 0.0012911347840983745
+  },
+  "model": {
+    "name": "LogisticRegression",
+    "solver": "lbfgs",
+    "max_iter": 1000,
+    "class_weight": null,
+    "n_features": 14,
+    "train_seconds": 2.4855410830023175
+  },
+  "test_metrics_at_0.5": {
+    "threshold": 0.5,
+    "accuracy": 0.9999897840826578,
+    "precision": 1.0,
+    "recall": 0.9920876445526476,
+    "f1": 0.9960281087687137,
+    "roc_auc": 0.99900628741455,
+    "pr_auc": 0.9975869495346895,
+    "mcc": 0.9960308712426549,
+    "brier": 7.1151604497793475e-06,
+    "predicted_positive_rate": 0.0012809188667561476,
+    "confusion_matrix": {
+      "tn": 1270881,
+      "fp": 0,
+      "fn": 13,
+      "tp": 1630
+    }
+  },
+  "test_metrics_at_calibration_threshold": {
+    "threshold": 0.4073884220212019,
+    "accuracy": 0.9999968566408177,
+    "precision": 1.0,
+    "recall": 0.9975654290931223,
+    "f1": 0.9987812309567337,
+    "roc_auc": 0.99900628741455,
+    "pr_auc": 0.9975869495346895,
+    "mcc": 0.998780400960441,
+    "brier": 7.1151604497793475e-06,
+    "predicted_positive_rate": 0.001287991424916151,
+    "confusion_matrix": {
+      "tn": 1270881,
+      "fp": 0,
+      "fn": 4,
+      "tp": 1639
+    }
+  },
+  "calibration_threshold": 0.4073884220212019,
+  "inference_timing": {
+    "batch_ms_per_row": 3.0507519986713306e-05,
+    "single_p50_ms": 0.08565700045437552,
+    "single_p95_ms": 0.09142984854406676,
+    "single_n": 500
+  },
+  "ablation_probe_lr": {
+    "full_contract": {
+      "roc_auc": 0.99900628741455,
+      "pr_auc": 0.9975869495346895,
+      "f1": 0.9987812309567337,
+      "recall": 0.9975654290931223,
+      "threshold": 0.4073884220212019,
+      "n_features": 14
+    },
+    "no_new_balances": {
+      "roc_auc": 0.9498098846160933,
+      "pr_auc": 0.2934359998337364,
+      "f1": 0.35406698564593303,
+      "recall": 0.29275715155203896,
+      "threshold": 0.03713022518268751,
+      "n_features": 9
+    },
+    "amount_only": {
+      "roc_auc": 0.8902558493405232,
+      "pr_auc": 0.009431342186626626,
+      "f1": 0.03609138030332117,
+      "recall": 0.057212416311625075,
+      "threshold": 0.009873377267961315,
+      "n_features": 6
+    }
+  },
+  "majority_class_accuracy": 0.9987088652159016
+}

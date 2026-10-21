@@ -45,8 +45,12 @@ python -m ml.training.eda.eda_profile
 # build splits + fit the shared preprocessor (full data)
 python -m ml.training.scripts.prepare_data
 
+# baseline (full) + optional ablation preview
+python -m ml.training.scripts.run_baseline --ablation
+
 # same on the 200k sample
 python -m ml.training.scripts.prepare_data --sample
+python -m ml.training.scripts.run_baseline --sample
 
 # tests for the shared module and preprocessing
 pytest ml/training/tests -q
