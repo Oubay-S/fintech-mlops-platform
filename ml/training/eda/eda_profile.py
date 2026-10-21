@@ -92,6 +92,14 @@ def main() -> None:
     )
     overall_consistent = float(consistency.mean() * 100)
 
+    step_profile = (
+        df.assign(step_bucket=pd.cut(df["step"], bins=[0, 100, 200, 300, 400, 500, 600, 744], right=False))
+        .groupby("step_bucket", observed=True)["isFraud"]
+        .agg(rows="size", frauds="sum")
+        .assign(rate_pct=lambda d: d["frauds"] / d["rows"] * 100)
+        .reset_index()
+    )
+
     rule_mask = (df["amount"] == df["oldbalanceOrg"]) & df["type"].isin(TRANSFER_TYPES)
     rule_rows = int(rule_mask.sum())
     rule_frauds = int(df.loc[rule_mask, "isFraud"].sum())
@@ -163,6 +171,17 @@ def main() -> None:
         ax.text(i, value, f"{value:.1f}%", ha="center", va="bottom", fontsize=9)
     _save(fig, "05_zero_balance_after.png")
 
+    fig, ax = plt.subplots(figsize=(8, 4))
+    labels = [str(b) for b in step_profile["step_bucket"]]
+    ax.bar(labels, step_profile["rate_pct"], color="#F58518")
+    ax.set_ylabel("fraud rate (%)")
+    ax.set_xlabel("step bucket (hours)")
+    ax.set_title("PaySim — fraud rate by time bucket (temporal drift)")
+    ax.tick_params(axis="x", rotation=30)
+    for i, value in enumerate(step_profile["rate_pct"]):
+        ax.text(i, value, f"{value:.2f}%", ha="center", va="bottom", fontsize=7)
+    _save(fig, "06_temporal_drift.png")
+
     # ---- report --------------------------------------------------------------
     report = f"""# PaySim — EDA Report (first pass)
 
@@ -197,7 +216,13 @@ Rows satisfying `newbalanceOrig = oldbalanceOrg − amount` (tolerance 0.01): **
 
 {_md_table(cons_by_type)}
 
-## 6. The trivial rule
+## 6. Temporal drift
+
+{_md_table(step_profile)}
+
+Transaction volume collapses after step ~400 while the fraud rate rises sharply (from ~0.1% early to >1.5% in the last bucket). This is another simulator artifact. It motivates the two-protocol evaluation: **primary = stratified random split** (stable benchmark), **robustness = temporal holdout** (quantifies drift).
+
+## 7. The trivial rule
 
 Rows with `amount == oldbalanceOrg` on TRANSFER/CASH_OUT:
 
@@ -207,11 +232,11 @@ Rows with `amount == oldbalanceOrg` on TRANSFER/CASH_OUT:
 
 This is a property of the simulator. It is why the contract model is expected to score near-perfectly; the restricted ablation (without the new-balance fields) will quantify it.
 
-## 7. `newbalanceOrig == 0`
+## 8. `newbalanceOrig == 0`
 
 {_md_table(zero_after)}
 
-## 8. Account identity
+## 9. Account identity
 
 | Metric | Value |
 |---|---|
@@ -220,35 +245,47 @@ This is a property of the simulator. It is why the contract model is expected to
 | Max occurrences of one `nameOrig` | {orig_top_freq} |
 | Unique `nameDest` | {dest_unique:,} |
 
-## 9. `isFlaggedFraud`
+## 10. `isFlaggedFraud`
 
 - Flagged rows: **{flagged_rows}**
 - Of those, actual frauds: **{flagged_frauds}**
 - This column is a rule output and is **never** used as a feature.
 
-## 10. Figures
+## 11. Figures
 
 ![Class balance](figures/01_class_balance.png)
 ![Fraud rate by type](figures/02_fraud_rate_by_type.png)
 ![Amount distribution](figures/03_amount_by_class.png)
 ![Balance consistency](figures/04_balance_consistency.png)
 ![Zero balance after](figures/05_zero_balance_after.png)
+![Temporal drift](figures/06_temporal_drift.png)
 
-## 11. Findings
+## 12. Findings
 
 1. Fraud is rare ({fraud_rate:.3f}%) and exists only in TRANSFER and CASH_OUT.
 2. The label is near-deterministic: `amount == oldbalanceOrg` covers {rule_coverage:.2f}% of frauds with {rule_rate:.2f}% precision.
 3. Balance arithmetic is inconsistent on most rows, so balance-based reasoning is artificial.
 4. {orig_once_pct:.2f}% of sender accounts appear once — no sender-history features.
-5. The contract model will be near-perfect; the restricted ablation and decision-level evaluation are mandatory for a credible report.
+5. Fraud rate increases sharply with time (temporal drift): the last bucket is >1.5% versus ~0.1% early. This motivates the stratified primary split + temporal robustness holdout.
+6. The contract model will be near-perfect; the restricted ablation and decision-level evaluation are mandatory for a credible report.
 
-## 12. Next steps
+## 13. Next steps
 
-- Phase 2: shared preprocessing module, temporal split + calibration split, leakage guards.
+- Phase 2: shared preprocessing module, **stratified primary split**, calibration split, and a **temporal robustness holdout**; leakage guards.
 - Baseline (Logistic Regression) with the full metric suite.
 """
     report_path = REPORT_DIR / "eda_report.md"
     report_path.write_text(report)
+
+    step_profile_records = [
+        {
+            "bucket": str(row.step_bucket),
+            "rows": int(row.rows),
+            "frauds": int(row.frauds),
+            "rate_pct": round(float(row.rate_pct), 4),
+        }
+        for row in step_profile.itertuples()
+    ]
 
     summary = {
         "rows": n_rows,
@@ -267,12 +304,13 @@ This is a property of the simulator. It is why the contract model is expected to
         "unique_name_dest": dest_unique,
         "flagged_rows": flagged_rows,
         "flagged_actual_frauds": flagged_frauds,
+        "temporal_drift": step_profile_records,
     }
     (REPORT_DIR / "eda_summary.json").write_text(json.dumps(summary, indent=2))
 
     print("EDA report:", report_path)
     print("Figures:", FIG_DIR)
-    print(json.dumps(summary, indent=2))
+    print(json.dumps({k: v for k, v in summary.items() if k != "temporal_drift"}, indent=2))
 
 
 if __name__ == "__main__":

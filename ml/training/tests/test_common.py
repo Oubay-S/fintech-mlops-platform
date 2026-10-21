@@ -38,5 +38,5 @@ def test_temporal_split() -> None:
     df = load_sample()
     train, test = temporal_split(df, test_frac=0.2)
     assert len(train) + len(test) == len(df)
-    assert len(test) == 40_000
-    assert train["step"].max() <= test["step"].min()
+    assert 0.15 <= len(test) / len(df) <= 0.25
+    assert train["step"].max() < test["step"].min()

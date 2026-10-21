@@ -42,11 +42,21 @@ From the repository root:
 # first EDA pass: stats + figures + report
 python -m ml.training.eda.eda_profile
 
-# tests for the shared module
+# build splits + fit the shared preprocessor (full data)
+python -m ml.training.scripts.prepare_data
+
+# same on the 200k sample
+python -m ml.training.scripts.prepare_data --sample
+
+# tests for the shared module and preprocessing
 pytest ml/training/tests -q
 ```
 
-## Interactive EDA
+## Evaluation protocols
+
+- **Primary:** stratified random 80/20 split (seed 42) — used for the benchmark and the statistics.
+- **Robustness:** temporal holdout (later 20% of rows by `step`, no hour overlap) — used only to quantify drift; never for fitting or model selection.
+- **Calibration:** 20% of the primary training set (stratified), reserved for split conformal prediction.
 
 JupyterLab is installed on the workstation. From the repository root:
 

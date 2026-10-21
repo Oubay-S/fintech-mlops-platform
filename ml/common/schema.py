@@ -48,6 +48,16 @@ DERIVED_FEATURES = [
 FEATURE_COLUMNS = CONTRACT_FEATURES + DERIVED_FEATURES
 TARGET = "isFraud"
 
+# Model-input groups (after contract mapping + derived features).
+NUMERIC_FEATURES = [
+    "amount",
+    "sender_old_balance",
+    "sender_new_balance",
+    "receiver_old_balance",
+    "receiver_new_balance",
+] + DERIVED_FEATURES
+CATEGORICAL_FEATURES = ["type"]
+
 # Columns that must never enter the feature matrix (leakage / identifiers / non-contract).
 FORBIDDEN_FEATURES = ["isFlaggedFraud", "step", "nameOrig", "nameDest"]
 
@@ -57,3 +67,10 @@ def assert_paysim_schema(df: pd.DataFrame) -> None:
     missing = [c for c in PAYSIM_COLUMNS if c not in df.columns]
     if missing:
         raise ValueError(f"Missing PaySim columns: {missing}")
+
+
+def assert_no_forbidden_columns(df: pd.DataFrame) -> None:
+    """Raise if a forbidden column (leakage / identifier) is present."""
+    leaked = [c for c in FORBIDDEN_FEATURES if c in df.columns]
+    if leaked:
+        raise ValueError(f"Forbidden columns in feature matrix: {leaked}")

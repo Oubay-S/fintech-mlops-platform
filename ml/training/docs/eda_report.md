@@ -49,7 +49,21 @@ Rows satisfying `newbalanceOrig = oldbalanceOrg − amount` (tolerance 0.01): **
 | PAYMENT | 45.8101 |
 | TRANSFER | 4.5274 |
 
-## 6. The trivial rule
+## 6. Temporal drift
+
+| step_bucket | rows | frauds | rate_pct |
+|---|---|---|---|
+| [0, 100) | 1,059,510 | 1,184 | 0.1117 |
+| [100, 200) | 1,322,664 | 1,062 | 0.0803 |
+| [200, 300) | 1,660,300 | 1,147 | 0.0691 |
+| [300, 400) | 1,713,646 | 1,068 | 0.0623 |
+| [400, 500) | 299,579 | 1,096 | 0.3658 |
+| [500, 600) | 203,330 | 1,038 | 0.5105 |
+| [600, 744) | 103,591 | 1,618 | 1.5619 |
+
+Transaction volume collapses after step ~400 while the fraud rate rises sharply (from ~0.1% early to >1.5% in the last bucket). This is another simulator artifact. It motivates the two-protocol evaluation: **primary = stratified random split** (stable benchmark), **robustness = temporal holdout** (quantifies drift).
+
+## 7. The trivial rule
 
 Rows with `amount == oldbalanceOrg` on TRANSFER/CASH_OUT:
 
@@ -59,14 +73,14 @@ Rows with `amount == oldbalanceOrg` on TRANSFER/CASH_OUT:
 
 This is a property of the simulator. It is why the contract model is expected to score near-perfectly; the restricted ablation (without the new-balance fields) will quantify it.
 
-## 7. `newbalanceOrig == 0`
+## 8. `newbalanceOrig == 0`
 
 | isFraud | zero_balance_pct |
 |---|---|
 | 0.0000 | 56.6774 |
 | 1.0000 | 98.0519 |
 
-## 8. Account identity
+## 9. Account identity
 
 | Metric | Value |
 |---|---|
@@ -75,29 +89,31 @@ This is a property of the simulator. It is why the contract model is expected to
 | Max occurrences of one `nameOrig` | 3 |
 | Unique `nameDest` | 2,722,362 |
 
-## 9. `isFlaggedFraud`
+## 10. `isFlaggedFraud`
 
 - Flagged rows: **16**
 - Of those, actual frauds: **16**
 - This column is a rule output and is **never** used as a feature.
 
-## 10. Figures
+## 11. Figures
 
 ![Class balance](figures/01_class_balance.png)
 ![Fraud rate by type](figures/02_fraud_rate_by_type.png)
 ![Amount distribution](figures/03_amount_by_class.png)
 ![Balance consistency](figures/04_balance_consistency.png)
 ![Zero balance after](figures/05_zero_balance_after.png)
+![Temporal drift](figures/06_temporal_drift.png)
 
-## 11. Findings
+## 12. Findings
 
 1. Fraud is rare (0.129%) and exists only in TRANSFER and CASH_OUT.
 2. The label is near-deterministic: `amount == oldbalanceOrg` covers 97.82% of frauds with 100.00% precision.
 3. Balance arithmetic is inconsistent on most rows, so balance-based reasoning is artificial.
 4. 99.85% of sender accounts appear once — no sender-history features.
-5. The contract model will be near-perfect; the restricted ablation and decision-level evaluation are mandatory for a credible report.
+5. Fraud rate increases sharply with time (temporal drift): the last bucket is >1.5% versus ~0.1% early. This motivates the stratified primary split + temporal robustness holdout.
+6. The contract model will be near-perfect; the restricted ablation and decision-level evaluation are mandatory for a credible report.
 
-## 12. Next steps
+## 13. Next steps
 
-- Phase 2: shared preprocessing module, temporal split + calibration split, leakage guards.
+- Phase 2: shared preprocessing module, **stratified primary split**, calibration split, and a **temporal robustness holdout**; leakage guards.
 - Baseline (Logistic Regression) with the full metric suite.

@@ -1,0 +1,53 @@
+{
+  "dataset": "full",
+  "rows": 6362620,
+  "primary_protocol": {
+    "name": "stratified random split",
+    "random_state": 42,
+    "train_rows": 5090096,
+    "calibration_rows": 1018020,
+    "fit_rows": 4072076,
+    "test_rows": 1272524,
+    "fraud_rate": {
+      "train": 0.0012907418642005967,
+      "fit": 0.001290742117779727,
+      "calibration": 0.001290740849885071,
+      "test": 0.0012911347840983745
+    }
+  },
+  "temporal_robustness": {
+    "name": "temporal holdout (later rows, no hour overlap)",
+    "train_rows": 5069097,
+    "test_rows": 1293523,
+    "train_step_range": [
+      1,
+      354
+    ],
+    "test_step_range": [
+      355,
+      743
+    ],
+    "fraud_rate": {
+      "train": 0.0007802178573422445,
+      "test": 0.003291785302619281
+    }
+  },
+  "feature_names": [
+    "amount",
+    "sender_old_balance",
+    "sender_new_balance",
+    "receiver_old_balance",
+    "receiver_new_balance",
+    "balance_drain_ratio",
+    "receiver_gain_ratio",
+    "sender_zero_after",
+    "amount_equals_old_balance",
+    "type_CASH_IN",
+    "type_CASH_OUT",
+    "type_DEBIT",
+    "type_PAYMENT",
+    "type_TRANSFER"
+  ],
+  "n_features": 14,
+  "preprocessor": "ml/common/preprocessing.py::build_preprocessor"
+}

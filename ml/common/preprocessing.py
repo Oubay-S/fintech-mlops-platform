@@ -7,8 +7,17 @@ serving code (parity is enforced by tests).
 from __future__ import annotations
 
 import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from .schema import CONTRACT_FEATURES, PAYSIM_TO_CONTRACT
+from .schema import (
+    CATEGORICAL_FEATURES,
+    CONTRACT_FEATURES,
+    NUMERIC_FEATURES,
+    PAYSIM_TO_CONTRACT,
+    TARGET,
+)
 
 
 def to_contract_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -43,18 +52,111 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     return add_derived_features(to_contract_frame(df))
 
 
+def build_target(df: pd.DataFrame) -> pd.Series:
+    """Return the target aligned with ``build_features`` output."""
+    if TARGET not in df.columns:
+        raise ValueError(f"Missing target column: {TARGET}")
+    return df[TARGET].reset_index(drop=True)
+
+
+def build_preprocessor() -> ColumnTransformer:
+    """The single preprocessing object used by training and serving.
+
+    - numeric contract fields + derived features: StandardScaler
+    - ``type``: one-hot encoding
+
+    Scaling is harmless for tree models and required for LR/SVM/MLP, so one
+    transformation keeps the benchmark fair and the serving path identical.
+    """
+    return ColumnTransformer(
+        transformers=[
+            ("num", StandardScaler(), NUMERIC_FEATURES),
+            (
+                "cat",
+                OneHotEncoder(handle_unknown="ignore", sparse_output=False),
+                CATEGORICAL_FEATURES,
+            ),
+        ],
+        remainder="drop",
+        verbose_feature_names_out=False,
+    )
+
+
 def temporal_split(
     df: pd.DataFrame,
     *,
     test_frac: float = 0.2,
     time_col: str = "step",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split by simulation time: earliest part for training, latest for testing."""
+    """Temporal holdout (robustness): train = earlier rows, test = later rows.
+
+    The cut is placed at a ``step`` boundary: train = steps before the cut,
+    test = steps at/after the cut. This avoids mixing the same hour between
+    the two sets. Because transaction volume is not uniform over time, the
+    row fraction of the test set can differ from ``test_frac``.
+    """
     if not 0 < test_frac < 1:
         raise ValueError("test_frac must be in (0, 1)")
     if time_col not in df.columns:
         raise ValueError(f"Missing time column: {time_col}")
 
     ordered = df.sort_values(time_col, kind="mergesort").reset_index(drop=True)
-    cut = int(len(ordered) * (1 - test_frac))
-    return ordered.iloc[:cut].copy(), ordered.iloc[cut:].copy()
+    cut_idx = int(len(ordered) * (1 - test_frac))
+    cut_idx = max(1, min(len(ordered) - 1, cut_idx))
+    cut_step = ordered.iloc[cut_idx][time_col]
+
+    train = ordered[ordered[time_col] < cut_step].reset_index(drop=True)
+    test = ordered[ordered[time_col] >= cut_step].reset_index(drop=True)
+    if train.empty or test.empty:
+        raise ValueError("Temporal split produced an empty train or test set")
+    return train, test
+
+
+def stratified_split(
+    df: pd.DataFrame,
+    *,
+    test_frac: float = 0.2,
+    random_state: int = 42,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Primary split: stratified random train/test split.
+
+    Keeps the fraud rate stable across the two sets. The temporal holdout
+    (``temporal_split``) is used separately as a robustness check.
+    """
+    if not 0 < test_frac < 1:
+        raise ValueError("test_frac must be in (0, 1)")
+    if TARGET not in df.columns:
+        raise ValueError(f"Missing target column: {TARGET}")
+
+    train_df, test_df = train_test_split(
+        df,
+        test_size=test_frac,
+        random_state=random_state,
+        stratify=df[TARGET],
+    )
+    return train_df.reset_index(drop=True), test_df.reset_index(drop=True)
+
+
+def train_calibration_split(
+    train_df: pd.DataFrame,
+    *,
+    cal_frac: float = 0.2,
+    random_state: int = 42,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Carve a calibration set out of the training period (stratified).
+
+    The calibration set is used by split conformal prediction. It is drawn
+    from the training period only — never from the test period.
+    """
+    if not 0 < cal_frac < 1:
+        raise ValueError("cal_frac must be in (0, 1)")
+    if TARGET not in train_df.columns:
+        raise ValueError(f"Missing target column: {TARGET}")
+
+    fit_df, cal_df = train_test_split(
+        train_df,
+        test_size=cal_frac,
+        random_state=random_state,
+        stratify=train_df[TARGET],
+    )
+    return fit_df.reset_index(drop=True), cal_df.reset_index(drop=True)

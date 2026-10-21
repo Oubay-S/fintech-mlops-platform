@@ -14,5 +14,49 @@
   "name_orig_once_pct": 99.85,
   "unique_name_dest": 2722362,
   "flagged_rows": 16,
-  "flagged_actual_frauds": 16
+  "flagged_actual_frauds": 16,
+  "temporal_drift": [
+    {
+      "bucket": "[0, 100)",
+      "rows": 1059510,
+      "frauds": 1184,
+      "rate_pct": 0.1117
+    },
+    {
+      "bucket": "[100, 200)",
+      "rows": 1322664,
+      "frauds": 1062,
+      "rate_pct": 0.0803
+    },
+    {
+      "bucket": "[200, 300)",
+      "rows": 1660300,
+      "frauds": 1147,
+      "rate_pct": 0.0691
+    },
+    {
+      "bucket": "[300, 400)",
+      "rows": 1713646,
+      "frauds": 1068,
+      "rate_pct": 0.0623
+    },
+    {
+      "bucket": "[400, 500)",
+      "rows": 299579,
+      "frauds": 1096,
+      "rate_pct": 0.3658
+    },
+    {
+      "bucket": "[500, 600)",
+      "rows": 203330,
+      "frauds": 1038,
+      "rate_pct": 0.5105
+    },
+    {
+      "bucket": "[600, 744)",
+      "rows": 103591,
+      "frauds": 1618,
+      "rate_pct": 1.5619
+    }
+  ]
 }
