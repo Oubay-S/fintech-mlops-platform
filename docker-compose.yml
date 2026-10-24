@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
 
   minio:
-    image: minio/minio:latest
+    image: pgsty/silo:latest
     container_name: fintech-minio
     command: server /data --console-address ":9001"
     environment:
@@ -39,22 +39,22 @@ services:
         limits:
           memory: 300M
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      test: ["CMD", "silo", "healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
   create-buckets:
-    image: minio/mc:latest
+    image: pgsty/mc:latest
     container_name: fintech-minio-init
     depends_on:
       minio:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      /usr/bin/mc alias set local http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-changeme_minio};
-      /usr/bin/mc mb --ignore-existing local/$${MINIO_BUCKET:-mlflow-artifacts};
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-changeme_minio};
+      mc mb --ignore-existing local/$${MINIO_BUCKET:-mlflow-artifacts};
       exit 0;
       "
     deploy:
@@ -63,7 +63,8 @@ services:
           memory: 64M
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.16.2
+    build: ./infra/docker/mlflow
+    image: fintech-mlflow:v2.16.2
     container_name: fintech-mlflow
     command: >
       mlflow server
