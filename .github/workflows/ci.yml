@@ -1,0 +1,267 @@
+name: CI Quality Gate
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+# Cancel in-progress runs on the same branch when new commits are pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ==========================================
+  # 1. Secret Detection (Gitleaks)
+  # ==========================================
+  gitleaks:
+    name: Secret Leak Detection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  # ==========================================
+  # 2. Path-based Filtering
+  # ==========================================
+  filter:
+    name: Detect Changed Components
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.changes.outputs.services }}
+      ml: ${{ steps.changes.outputs.ml }}
+      frontend: ${{ steps.changes.outputs.frontend }}
+      k8s: ${{ steps.changes.outputs.k8s }}
+      compose: ${{ steps.changes.outputs.compose }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Filter Paths
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            services:
+              - 'services/**'
+            ml:
+              - 'ml/**'
+            frontend:
+              - 'frontend/**'
+            k8s:
+              - 'k8s/**'
+            compose:
+              - 'docker-compose.yml'
+              - 'infra/**'
+
+  # ==========================================
+  # 3. Backend Microservices (Spring Boot / Java 21)
+  # ==========================================
+  backend-services:
+    name: Backend Microservices (Java 21)
+    needs: filter
+    if: needs.filter.outputs.services == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build and Test Microservices
+        run: |
+          echo "Scanning services for Maven pom.xml files..."
+          FOUND=0
+          while IFS= read -r pom; do
+            [ -z "$pom" ] && continue
+            DIR=$(dirname "$pom")
+            echo "::group::Building $DIR"
+            echo "Running 'mvn -B clean verify' in $DIR..."
+            mvn -B clean verify --file "$pom"
+            echo "::endgroup::"
+            FOUND=1
+          done < <(find services -name "pom.xml" -type f)
+          if [ "$FOUND" -eq 0 ]; then
+            echo "No pom.xml found in services directory yet. Skipping Maven verify."
+          fi
+
+  # ==========================================
+  # 4. Machine Learning & MLOps (Python 3.11)
+  # ==========================================
+  ml-services:
+    name: ML & MLOps Pipeline (Python 3.11)
+    needs: filter
+    if: needs.filter.outputs.ml == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Linting & Test Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 pytest
+
+      - name: Lint and Test Python Modules
+        run: |
+          echo "Scanning ml directory for Python tests..."
+          # Lint syntax errors and undefined names
+          flake8 ml --count --select=E9,F63,F7,F82 --show-source --statistics || true
+
+          while IFS= read -r req; do
+            [ -z "$req" ] && continue
+            echo "Installing dependencies from $req..."
+            pip install -r "$req" || true
+          done < <(find ml -name "requirements.txt" -type f)
+
+          if [ -d "ml" ] && find ml -name "test_*.py" -o -name "*_test.py" | grep -q .; then
+            echo "Running pytest on ml/..."
+            pytest ml/ -v
+          else
+            echo "No Python unit tests discovered in ml/ yet. Skipping pytest."
+          fi
+
+  # ==========================================
+  # 5. Frontend Dashboard (React + Vite)
+  # ==========================================
+  frontend:
+    name: Frontend React Dashboard (Node 20)
+    needs: filter
+    if: needs.filter.outputs.frontend == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Build Frontend Application
+        run: |
+          if [ -f "frontend/package.json" ]; then
+            cd frontend
+            if [ -f "package-lock.json" ]; then
+              npm ci
+            else
+              npm install
+            fi
+            npm run build
+          else
+            echo "No package.json found in frontend/ yet. Skipping npm build."
+          fi
+
+  # ==========================================
+  # 6. Kubernetes Manifest Validation (Kustomize)
+  # ==========================================
+  k8s-validation:
+    name: Kubernetes Manifests Validation
+    needs: filter
+    if: needs.filter.outputs.k8s == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Validate Kustomize Configurations
+        run: |
+          echo "Validating Kustomize overlays and bases..."
+          while IFS= read -r kustomize_file; do
+            [ -z "$kustomize_file" ] && continue
+            DIR=$(dirname "$kustomize_file")
+            echo "::group::Validating $DIR"
+            kubectl kustomize "$DIR" > /dev/null
+            echo "✓ $DIR is valid"
+            echo "::endgroup::"
+          done < <(find k8s -name "kustomization.yaml" -o -name "kustomization.yml")
+
+  # ==========================================
+  # 7. Docker Compose Validation
+  # ==========================================
+  compose-validation:
+    name: Docker Compose Config Validation
+    needs: filter
+    if: needs.filter.outputs.compose == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Create local .env from template
+        run: cp .env.example .env
+
+      - name: Validate Docker Compose Config
+        run: |
+          docker compose config --quiet
+          echo "✓ docker-compose.yml configuration is syntactically valid"
+
+  # ==========================================
+  # 8. Trivy Security Vulnerability Scan
+  # ==========================================
+  trivy-security:
+    name: Trivy Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy FS Scanner
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          format: 'table'
+          exit-code: '0' # Non-blocking advisory for Month 1 foundations
+
+  # ==========================================
+  # 9. Unified Status Gate (Required Check)
+  # ==========================================
+  ci-status:
+    name: CI Quality Gate Status
+    needs:
+      - gitleaks
+      - filter
+      - backend-services
+      - ml-services
+      - frontend
+      - k8s-validation
+      - compose-validation
+      - trivy-security
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify All Gates Passed
+        run: |
+          echo "Verifying job results..."
+          RESULTS="${{ needs.gitleaks.result }} ${{ needs.backend-services.result }} ${{ needs.ml-services.result }} ${{ needs.frontend.result }} ${{ needs.k8s-validation.result }} ${{ needs.compose-validation.result }} ${{ needs.trivy-security.result }}"
+          echo "Job statuses: $RESULTS"
+          if echo "$RESULTS" | grep -qE "failure|cancelled"; then
+            echo "❌ One or more CI Quality Gate jobs failed or were cancelled."
+            exit 1
+          fi
+          echo "✅ All CI Quality Gate checks succeeded!"

@@ -1,0 +1,17 @@
+title = "Gitleaks Configuration for FinTech MLOps Platform"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow dummy credentials in template/example files and documentation"
+paths = [
+    '''\.env\.example$''',
+    '''docs/.*''',
+    '''README\.md$''',
+    '''APPLICATION_CONCEPTION_PLAN.*\.md$''',
+]
+regexes = [
+    '''changeme_.*''',
+    '''minioadmin''',
+]
