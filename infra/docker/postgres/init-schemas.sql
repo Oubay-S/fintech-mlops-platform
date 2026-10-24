@@ -1,0 +1,9 @@
+-- Initialize the 6 isolated service schemas for FinTech MLOps Platform
+-- Reference: APPLICATION_CONCEPTION_PLAN V2.1 Section 13.1
+
+CREATE SCHEMA IF NOT EXISTS auth;
+CREATE SCHEMA IF NOT EXISTS customer;
+CREATE SCHEMA IF NOT EXISTS transaction;
+CREATE SCHEMA IF NOT EXISTS risk;
+CREATE SCHEMA IF NOT EXISTS notification;
+CREATE SCHEMA IF NOT EXISTS audit;
