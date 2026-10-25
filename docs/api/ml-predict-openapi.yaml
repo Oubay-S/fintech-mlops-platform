@@ -1,0 +1,981 @@
+openapi: 3.0.3
+info:
+  title: FinTech ML Serving API
+  description: |
+    Real-time fraud classification, Mondrian split-conformal uncertainty quantification,
+    model metadata, and embedding visualization service for the High-Availability MLOps FinTech Platform.
+
+    ### Integration & Security Architecture (`APPLICATION_CONCEPTION_PLAN V2.1` Sections 17 & 24.3)
+    - **Network Isolation (Inter-Service Security):** This service is strictly **cluster-internal** (`http://ml-serving:8000`), isolated via Kubernetes `NetworkPolicies`, and never exposed through the public API Gateway or Ingress. Only the Spring Boot **`risk-service` (`:8084`)** and **Prometheus** may reach it. An optional `X-Internal-Api-Key` header is supported when internal token enforcement is enabled via environment configuration.
+    - **Latency Target:** p95 inference `< 300 ms` (`risk-service` read timeout: `1500 ms`, connect timeout: `500 ms`, 1 retry).
+    - **Dataset Contract:** PaySim 6-feature inference contract (`type`, `amount`, `sender_old_balance`, `sender_new_balance`, `receiver_old_balance`, `receiver_new_balance`).
+    - **Derived Features (computed internally by ML Serving via `ml/common/preprocessing.py`):** `balance_drain_ratio`, `receiver_gain_ratio`, `sender_zero_after`, `amount_equals_old_balance`.
+  version: "1.0.0"
+  contact:
+    name: Role 5 — MLOps & ML Serving Engineer
+
+servers:
+  - url: http://localhost:8000
+    description: Local development & Docker Compose
+  - url: http://ml-serving:8000
+    description: Kubernetes cluster-internal service (called by risk-service only)
+
+tags:
+  - name: Prediction
+    description: Real-time fraud scoring with conformal prediction sets
+  - name: Health & Probes
+    description: Kubernetes canonical liveness/readiness probes and local dev aliases
+  - name: Model Metadata & Analytics
+    description: Model registry info and precomputed 2D embedding visualizations (PCA, t-SNE, UMAP)
+  - name: Observability
+    description: Prometheus metrics exposition
+
+paths:
+  /predict:
+    post:
+      tags:
+        - Prediction
+      summary: Score a financial transaction for fraud risk and conformal uncertainty
+      description: |
+        Evaluates a single transaction using the active `Production` (`@production` alias) model loaded
+        from the MLflow Model Registry (or the deterministic `Fallback` baseline if offline).
+
+        **Conformal `prediction_set` Semantics & Risk Service Policy (`APPLICATION_CONCEPTION_PLAN V2.1` Section 11.7):**
+        - `["fraud"]` -> Confident Fraud -> Rule R3 (`REJECTED` / `MODEL_HIGH_RISK`, suggested action: `BLOCK`)
+        - `["legit"]` -> Confident Legitimate -> Rule R5 (`PENDING_REVIEW` if `amount >= high_amount_threshold`) or Rule R6 (`APPROVED`, suggested action: `ALLOW`)
+        - `["legit", "fraud"]` -> Ambiguous / Both classes plausible -> Rule R4 (`PENDING_REVIEW` / `MODEL_UNCERTAIN`, suggested action: `HUMAN_REVIEW`)
+        - `[]` (empty set) -> Neither class meets conformal threshold (out-of-distribution / high epistemic uncertainty) -> Rule R4 (`PENDING_REVIEW` / `MODEL_UNCERTAIN`, suggested action: `HUMAN_REVIEW`)
+
+        *Note:* `action` (`ALLOW`, `BLOCK`, `HUMAN_REVIEW`) is a suggestion only; `risk-service` owns and enforces the final decision policy (Rules R1–R6).
+      operationId: predictTransaction
+      security:
+        - InternalApiKey: []
+        - {}
+      parameters:
+        - in: header
+          name: X-Correlation-Id
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Distributed correlation ID propagated from API Gateway and Risk Service
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PredictRequest"
+            examples:
+              legitimate_transfer:
+                summary: Standard legitimate transfer (partial balance)
+                value:
+                  schema_version: "1.0"
+                  request_id: "550e8400-e29b-41d4-a716-446655440000"
+                  features:
+                    type: "TRANSFER"
+                    amount: 1250.50
+                    sender_old_balance: 5000.00
+                    sender_new_balance: 3749.50
+                    receiver_old_balance: 100.00
+                    receiver_new_balance: 1350.50
+              suspicious_account_drain:
+                summary: High-risk full balance drain transfer
+                value:
+                  schema_version: "1.0"
+                  request_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                  features:
+                    type: "TRANSFER"
+                    amount: 250000.00
+                    sender_old_balance: 250000.00
+                    sender_new_balance: 0.00
+                    receiver_old_balance: 0.00
+                    receiver_new_balance: 250000.00
+              cash_out_withdrawal:
+                summary: Cash-out withdrawal to an agent account
+                value:
+                  schema_version: "1.0"
+                  request_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                  features:
+                    type: "CASH_OUT"
+                    amount: 45000.00
+                    sender_old_balance: 52000.00
+                    sender_new_balance: 7000.00
+                    receiver_old_balance: 120000.00
+                    receiver_new_balance: 165000.00
+      responses:
+        "200":
+          description: Transaction successfully scored
+          headers:
+            X-Correlation-Id:
+              schema:
+                type: string
+                format: uuid
+              description: Echoed correlation ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PredictResponse"
+              examples:
+                confident_legit_allow:
+                  summary: ALLOW — Confident legitimate prediction (prediction_set = ["legit"])
+                  value:
+                    schema_version: "1.0"
+                    request_id: "550e8400-e29b-41d4-a716-446655440000"
+                    action: "ALLOW"
+                    fraud_probability: 0.0132
+                    uncertainty:
+                      method: "split_conformal"
+                      confidence_level: 0.95
+                      prediction_set:
+                        - "legit"
+                      score: 0.08
+                    model:
+                      name: "fraud-detector"
+                      version: "1"
+                      stage: "Production"
+                      alias: "production"
+                    explanations:
+                      - feature: "amount"
+                        contribution: 0.14
+                      - feature: "balance_drain_ratio"
+                        contribution: -0.22
+                    inference_ms: 4.8
+                uncertain_human_review:
+                  summary: HUMAN_REVIEW — Uncertain prediction (prediction_set = ["legit", "fraud"])
+                  value:
+                    schema_version: "1.0"
+                    request_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                    action: "HUMAN_REVIEW"
+                    fraud_probability: 0.4620
+                    uncertainty:
+                      method: "split_conformal"
+                      confidence_level: 0.95
+                      prediction_set:
+                        - "legit"
+                        - "fraud"
+                      score: 0.78
+                    model:
+                      name: "fraud-detector"
+                      version: "1"
+                      stage: "Production"
+                      alias: "production"
+                    explanations:
+                      - feature: "balance_drain_ratio"
+                        contribution: 0.41
+                      - feature: "amount"
+                        contribution: 0.29
+                    inference_ms: 6.2
+                confident_fraud_block:
+                  summary: BLOCK — High-confidence fraud prediction (prediction_set = ["fraud"])
+                  value:
+                    schema_version: "1.0"
+                    request_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                    action: "BLOCK"
+                    fraud_probability: 0.9941
+                    uncertainty:
+                      method: "split_conformal"
+                      confidence_level: 0.95
+                      prediction_set:
+                        - "fraud"
+                      score: 0.03
+                    model:
+                      name: "fraud-detector"
+                      version: "1"
+                      stage: "Production"
+                      alias: "production"
+                    explanations:
+                      - feature: "amount_equals_old_balance"
+                        contribution: 0.68
+                      - feature: "sender_zero_after"
+                        contribution: 0.52
+                      - feature: "balance_drain_ratio"
+                        contribution: 0.44
+                    inference_ms: 5.1
+        "422":
+          description: Validation error (missing contract features, negative balance/amount, unsupported schema_version, or invalid transaction type)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                validation_error:
+                  summary: Negative amount or invalid transaction type (HTTP 422)
+                  value:
+                    code: "VALIDATION_FAILED"
+                    message: "Request validation failed on 1 field(s)."
+                    request_id: "550e8400-e29b-41d4-a716-446655440000"
+                    status: 422
+                    detail:
+                      - loc: ["body", "features", "amount"]
+                        msg: "Input should be greater than or equal to 0"
+                        type: "greater_than_equal"
+        "503":
+          description: Model not yet loaded or service temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                model_not_ready:
+                  summary: Model still warming up on startup (HTTP 503)
+                  value:
+                    code: "MODEL_NOT_READY"
+                    message: "Model artifact is still loading; readiness probe is not yet ready."
+                    request_id: "550e8400-e29b-41d4-a716-446655440000"
+                    status: 503
+                    detail: []
+
+  /health/live:
+    get:
+      tags:
+        - Health & Probes
+      summary: Canonical Kubernetes liveness probe
+      description: |
+        **Canonical liveness path for Kubernetes manifests (`livenessProbe`).**
+        Returns HTTP 200 if the FastAPI process event loop is alive and responsive.
+      operationId: healthLive
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthLiveResponse"
+
+  /health/ready:
+    get:
+      tags:
+        - Health & Probes
+      summary: Canonical Kubernetes readiness probe
+      description: |
+        **Canonical readiness path for Kubernetes manifests (`readinessProbe`).**
+        Returns HTTP 200 **only after** the model artifact (from MLflow Registry or local fallback)
+        and shared preprocessor are loaded in memory and ready to serve `/predict`.
+        Returns HTTP 503 during startup warmup or if model initialization failed.
+      operationId: healthReady
+      responses:
+        "200":
+          description: Model is loaded and ready to serve predictions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReadyResponse"
+        "503":
+          description: Model is not loaded yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReadyResponse"
+
+  /health:
+    get:
+      tags:
+        - Health & Probes
+      deprecated: true
+      summary: Local development alias for /health/live
+      description: |
+        **Deprecated alias** retained for backward compatibility with local Docker Compose CLI checks.
+        Kubernetes manifests MUST use `/health/live`.
+      operationId: healthAlias
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthLiveResponse"
+
+  /ready:
+    get:
+      tags:
+        - Health & Probes
+      deprecated: true
+      summary: Local development alias for /health/ready
+      description: |
+        **Deprecated alias** retained for backward compatibility.
+        Kubernetes manifests MUST use `/health/ready`.
+      operationId: readyAlias
+      responses:
+        "200":
+          description: Model is loaded and ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReadyResponse"
+        "503":
+          description: Model is not loaded yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReadyResponse"
+
+  /model-info:
+    get:
+      tags:
+        - Model Metadata & Analytics
+      summary: Retrieve active model metadata, evaluation metrics, and conformal configuration
+      description: |
+        Called by `risk-service` (`GET /risk/model-info`) to populate the Analyst and Admin
+        ML Analytics dashboard tab.
+      operationId: getModelInfo
+      responses:
+        "200":
+          description: Active model information
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelInfoResponse"
+
+  /viz/{method}:
+    get:
+      tags:
+        - Model Metadata & Analytics
+      x-status: planned
+      summary: Retrieve precomputed 2D embedding coordinates (PCA, t-SNE, UMAP)
+      description: |
+        **Implementation Priority:** Phase 2 (`x-status: planned` — stubbed with sample points in Milestone 1, populated with full offline embeddings in Milestone 2).
+
+        Called by `risk-service` (`GET /risk/viz/{method}`) to render the interactive 2D scatter plot
+        of legitimate vs. fraudulent clusters, classification errors, and uncertain points.
+        Embeddings are precomputed offline and capped (default ~2,000 points, max 10,000 points) so `risk-service`
+        never proxies multi-megabyte payloads.
+      operationId: getVisualizationEmbeddings
+      parameters:
+        - in: path
+          name: method
+          required: true
+          schema:
+            type: string
+            enum:
+              - pca
+              - tsne
+              - umap
+          description: Dimensionality reduction method
+      responses:
+        "200":
+          description: Precomputed 2D embedding points and metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmbeddingVizResponse"
+        "404":
+          description: Embedding method not found or artifact not yet generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /metrics:
+    get:
+      tags:
+        - Observability
+      summary: Prometheus metrics scrape endpoint
+      description: |
+        Exposes standard HTTP metrics and custom ML metrics in Prometheus text exposition format:
+        - `ml_inference_duration_seconds` (Histogram — model inference latency)
+        - `ml_predictions_total{action, prediction_set, model_version}` (Counter — total predictions by outcome)
+        - `ml_human_review_requests_total{model_version, reason}` (Counter — predictions routed to `HUMAN_REVIEW` due to conformal uncertainty `["legit", "fraud"]` or `[]`; drives the `HighMLUncertaintyRate` alert rule)
+        - `ml_prediction_set_size` (Histogram — distribution of conformal set sizes `0`, `1`, `2`)
+        - `ml_uncertainty_score` (Histogram — distribution of scalar uncertainty scores in `[0, 1]`)
+        - `ml_model_info{model_name, version, stage, alias}` (Gauge — active model metadata)
+      operationId: getPrometheusMetrics
+      responses:
+        "200":
+          description: Prometheus text exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # HELP ml_inference_duration_seconds Model inference latency in seconds
+                  # TYPE ml_inference_duration_seconds histogram
+                  ml_inference_duration_seconds_bucket{le="0.005",model_version="1"} 142.0
+                  ml_inference_duration_seconds_bucket{le="0.01",model_version="1"} 198.0
+                  ml_inference_duration_seconds_bucket{le="0.3",model_version="1"} 200.0
+                  ml_inference_duration_seconds_bucket{le="+Inf",model_version="1"} 200.0
+                  ml_inference_duration_seconds_count{model_version="1"} 200.0
+                  ml_inference_duration_seconds_sum{model_version="1"} 0.892
+                  # HELP ml_human_review_requests_total Total predictions flagged for human review due to uncertainty
+                  # TYPE ml_human_review_requests_total counter
+                  ml_human_review_requests_total{model_version="1",reason="conformal_ambiguous"} 6.0
+
+components:
+  securitySchemes:
+    InternalApiKey:
+      type: apiKey
+      in: header
+      name: X-Internal-Api-Key
+      description: Optional shared internal key when cluster-internal header validation is enabled.
+
+  schemas:
+    TransactionType:
+      type: string
+      description: |
+        PaySim transaction type. ML Training fits the one-hot encoder on all 5 PaySim types;
+        in production, the Spring Boot application only sends `TRANSFER` and `CASH_OUT` (Rule R1b).
+      enum:
+        - TRANSFER
+        - CASH_OUT
+        - PAYMENT
+        - CASH_IN
+        - DEBIT
+      example: TRANSFER
+
+    TransactionFeatures:
+      type: object
+      description: |
+        The 6 PaySim contract features sent by `risk-service` at decision time.
+        `sender_new_balance` and `receiver_new_balance` are computed by the application as the expected
+        post-transfer balances before execution.
+        Note: `amount` has `minimum: 0.0` because the PaySim dataset contains 16 fraud rows with `amount == 0.0`
+        (required for offline-vs-online parity tests in Issue #34), while the live Transaction service enforces `amount > 0` on user transfers.
+      required:
+        - type
+        - amount
+        - sender_old_balance
+        - sender_new_balance
+        - receiver_old_balance
+        - receiver_new_balance
+      additionalProperties: false
+      properties:
+        type:
+          $ref: "#/components/schemas/TransactionType"
+        amount:
+          type: number
+          format: double
+          minimum: 0.0
+          description: Transaction amount (`>= 0.0` to support PaySim zero-amount fraud rows in parity tests)
+          example: 1250.50
+        sender_old_balance:
+          type: number
+          format: double
+          minimum: 0.0
+          description: Sender wallet balance before the transaction (`oldbalanceOrg` in PaySim)
+          example: 5000.00
+        sender_new_balance:
+          type: number
+          format: double
+          minimum: 0.0
+          description: Expected sender wallet balance after the transaction (`newbalanceOrig` in PaySim)
+          example: 3749.50
+        receiver_old_balance:
+          type: number
+          format: double
+          minimum: 0.0
+          description: Receiver wallet balance before the transaction (`oldbalanceDest` in PaySim)
+          example: 100.00
+        receiver_new_balance:
+          type: number
+          format: double
+          minimum: 0.0
+          description: Expected receiver wallet balance after the transaction (`newbalanceDest` in PaySim)
+          example: 1350.50
+
+    PredictRequest:
+      type: object
+      required:
+        - schema_version
+        - request_id
+        - features
+      additionalProperties: false
+      properties:
+        schema_version:
+          type: string
+          pattern: "^1\\.[0-9]+$"
+          default: "1.0"
+          description: Contract schema version (`1.x` required by Risk Service)
+          example: "1.0"
+        request_id:
+          type: string
+          format: uuid
+          description: Unique identifier for the scoring request (typically the transfer ID or decision request UUID)
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        features:
+          $ref: "#/components/schemas/TransactionFeatures"
+
+    PredictionLabel:
+      type: string
+      enum:
+        - legit
+        - fraud
+
+    SuggestedAction:
+      type: string
+      description: |
+        Advisory action suggested by ML Serving based on `uncertainty.prediction_set`:
+        - `ALLOW` when `prediction_set == ["legit"]`
+        - `BLOCK` when `prediction_set == ["fraud"]`
+        - `HUMAN_REVIEW` when `prediction_set == ["legit", "fraud"]` or `[]`
+        Note: `action` is a suggestion only; `risk-service` makes the final binding decision (Rules R1–R6).
+      enum:
+        - ALLOW
+        - BLOCK
+        - HUMAN_REVIEW
+      example: HUMAN_REVIEW
+
+    UncertaintyEstimate:
+      type: object
+      required:
+        - method
+        - confidence_level
+        - prediction_set
+        - score
+      additionalProperties: false
+      properties:
+        method:
+          type: string
+          description: Uncertainty quantification algorithm used
+          enum:
+            - split_conformal
+            - mondrian_conformal
+            - ensemble_bootstrap
+          example: split_conformal
+        confidence_level:
+          type: number
+          format: double
+          minimum: 0.5
+          maximum: 0.999
+          description: Target conformal coverage level ($1 - \alpha$)
+          example: 0.95
+        prediction_set:
+          type: array
+          items:
+            $ref: "#/components/schemas/PredictionLabel"
+          minItems: 0
+          maxItems: 2
+          uniqueItems: true
+          description: |
+            Conformal prediction set $\subseteq \{\text{"legit"}, \text{"fraud"}\}$:
+            - `["fraud"]` -> BLOCK (Rule R3: `REJECTED` / `MODEL_HIGH_RISK`)
+            - `["legit"]` -> ALLOW (Rule R5/R6: `APPROVED` unless amount >= high-amount threshold)
+            - `["legit", "fraud"]` -> HUMAN_REVIEW (Rule R4: `PENDING_REVIEW` / `MODEL_UNCERTAIN`)
+            - `[]` (empty set, valid in conformal prediction) -> HUMAN_REVIEW (Rule R4: `PENDING_REVIEW` / `MODEL_UNCERTAIN`)
+          example:
+            - legit
+        score:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+          description: Normalized scalar uncertainty score in `[0, 1]` used for dashboards and alerts
+          example: 0.08
+
+    ModelRef:
+      type: object
+      required:
+        - name
+        - version
+        - stage
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          description: Registered model name in MLflow Model Registry
+          example: fraud-detector
+        version:
+          type: string
+          description: Model version identifier
+          example: "7"
+        stage:
+          type: string
+          description: |
+            Model lifecycle stage required by `APPLICATION_CONCEPTION_PLAN V2.1` Section 17.2.
+            Explicitly includes `Fallback` so a local fallback model is never mistaken for `Production`.
+          enum:
+            - Production
+            - Staging
+            - Fallback
+          example: Production
+        alias:
+          type: string
+          description: |
+            Modern MLflow 2.x model alias (`@production`, `@staging`, or `fallback`), provided alongside
+            `stage` for backward and forward compatibility.
+          enum:
+            - production
+            - staging
+            - fallback
+          example: production
+
+    FeatureExplanation:
+      type: object
+      required:
+        - feature
+        - contribution
+      additionalProperties: false
+      properties:
+        feature:
+          type: string
+          description: Feature name (contract or derived feature)
+          example: amount
+        contribution:
+          type: number
+          format: double
+          description: Signed attribution weight toward the fraud class
+          example: 0.31
+
+    PredictResponse:
+      type: object
+      required:
+        - schema_version
+        - request_id
+        - action
+        - fraud_probability
+        - uncertainty
+        - model
+        - inference_ms
+      additionalProperties: false
+      properties:
+        schema_version:
+          type: string
+          example: "1.0"
+        request_id:
+          type: string
+          format: uuid
+          description: Echoed `request_id` from `PredictRequest` for end-to-end correlation, tracing, and structured logging
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        action:
+          $ref: "#/components/schemas/SuggestedAction"
+        fraud_probability:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+          description: Calibrated probability that the transaction is fraudulent
+          example: 0.0132
+        uncertainty:
+          $ref: "#/components/schemas/UncertaintyEstimate"
+        model:
+          $ref: "#/components/schemas/ModelRef"
+        explanations:
+          type: array
+          x-status: planned
+          description: Optional top feature contributions (displayed to Fraud Analysts only; lower priority than core prediction fields)
+          items:
+            $ref: "#/components/schemas/FeatureExplanation"
+        inference_ms:
+          type: number
+          format: double
+          minimum: 0.0
+          description: Pure model preprocessing + inference execution time in milliseconds
+          example: 7.4
+
+    HealthLiveResponse:
+      type: object
+      required:
+        - status
+        - service
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+          example: ok
+        service:
+          type: string
+          example: ml-serving
+        model_version:
+          type: string
+          example: "7"
+
+    HealthReadyResponse:
+      type: object
+      required:
+        - status
+        - ready
+        - model
+      properties:
+        status:
+          type: string
+          enum:
+            - ready
+            - not_ready
+          example: ready
+        ready:
+          type: boolean
+          example: true
+        model:
+          $ref: "#/components/schemas/ModelRef"
+
+    ModelInfoResponse:
+      type: object
+      required:
+        - schema_version
+        - model
+        - conformal_config
+        - metrics_summary
+        - contract_features
+        - derived_features
+      properties:
+        schema_version:
+          type: string
+          example: "1.0"
+        model:
+          type: object
+          required:
+            - name
+            - version
+            - stage
+            - alias
+            - algorithm
+          properties:
+            name:
+              type: string
+              example: fraud-detector
+            version:
+              type: string
+              example: "7"
+            stage:
+              type: string
+              enum:
+                - Production
+                - Staging
+                - Fallback
+              example: Production
+            alias:
+              type: string
+              enum:
+                - production
+                - staging
+                - fallback
+              example: production
+            algorithm:
+              type: string
+              example: XGBClassifier
+            run_id:
+              type: string
+              nullable: true
+              example: "a83f1c92b04d4e119a7c2201948e7b11"
+            trained_at:
+              type: string
+              format: date-time
+              nullable: true
+              example: "2026-11-15T14:30:00Z"
+        conformal_config:
+          type: object
+          required:
+            - method
+            - confidence_level
+            - target_review_rate
+          properties:
+            method:
+              type: string
+              example: split_conformal
+            confidence_level:
+              type: number
+              format: double
+              example: 0.95
+            target_review_rate:
+              type: number
+              format: double
+              description: Target upper bound for human review rate on in-scope traffic (`TRANSFER` + `CASH_OUT`)
+              example: 0.05
+            q_hat_fraud:
+              type: number
+              format: double
+              nullable: true
+              example: 0.58
+            q_hat_legit:
+              type: number
+              format: double
+              nullable: true
+              example: 0.92
+        metrics_summary:
+          type: object
+          description: Validation metrics recorded on the in-scope (`TRANSFER` + `CASH_OUT`) test split
+          properties:
+            roc_auc:
+              type: number
+              format: double
+              example: 0.9990
+            pr_auc:
+              type: number
+              format: double
+              example: 0.9976
+            f1:
+              type: number
+              format: double
+              example: 0.9960
+            precision:
+              type: number
+              format: double
+              example: 1.0000
+            recall:
+              type: number
+              format: double
+              example: 0.9921
+            mcc:
+              type: number
+              format: double
+              example: 0.9960
+            brier_score:
+              type: number
+              format: double
+              example: 0.000007
+            expected_review_rate:
+              type: number
+              format: double
+              example: 0.018
+            inference_p95_ms:
+              type: number
+              format: double
+              example: 4.2
+        contract_features:
+          type: array
+          items:
+            type: string
+          example:
+            - type
+            - amount
+            - sender_old_balance
+            - sender_new_balance
+            - receiver_old_balance
+            - receiver_new_balance
+        derived_features:
+          type: array
+          items:
+            type: string
+          example:
+            - balance_drain_ratio
+            - receiver_gain_ratio
+            - sender_zero_after
+            - amount_equals_old_balance
+
+    EmbeddingPoint:
+      type: object
+      required:
+        - x
+        - y
+        - true_label
+        - predicted_label
+        - uncertain
+        - type
+        - amount
+      properties:
+        x:
+          type: number
+          format: float
+          example: -2.41
+        y:
+          type: number
+          format: float
+          example: 1.87
+        true_label:
+          type: integer
+          enum: [0, 1]
+          description: Ground-truth class (`0` = legitimate, `1` = fraud)
+          example: 1
+        predicted_label:
+          type: integer
+          enum: [0, 1]
+          description: Model predicted class (`0` = legitimate, `1` = fraud)
+          example: 1
+        uncertain:
+          type: boolean
+          description: True if conformal prediction set had size != 1 (`["legit", "fraud"]` or `[]`)
+          example: false
+        error:
+          type: boolean
+          description: True if `predicted_label != true_label`
+          example: false
+        type:
+          $ref: "#/components/schemas/TransactionType"
+        amount:
+          type: number
+          format: double
+          example: 185000.00
+        balance_drain_ratio:
+          type: number
+          format: double
+          example: 0.9999
+
+    EmbeddingVizResponse:
+      type: object
+      required:
+        - schema_version
+        - method
+        - n_points
+        - points
+      properties:
+        schema_version:
+          type: string
+          example: "1.0"
+        method:
+          type: string
+          enum:
+            - pca
+            - tsne
+            - umap
+          example: umap
+        n_points:
+          type: integer
+          maximum: 10000
+          description: Number of points returned (default capped at ~2,000 points for fast proxying)
+          example: 2000
+        generated_at:
+          type: string
+          format: date-time
+          example: "2026-11-15T15:00:00Z"
+        points:
+          type: array
+          maxItems: 10000
+          description: Downsampled 2D embedding coordinates (default ~2,000 points)
+          items:
+            $ref: "#/components/schemas/EmbeddingPoint"
+
+    ValidationErrorItem:
+      type: object
+      description: FastAPI / Pydantic v2 validation error detail item
+      required:
+        - loc
+        - msg
+        - type
+      properties:
+        loc:
+          type: array
+          items:
+            type: string
+          example: ["body", "features", "amount"]
+        msg:
+          type: string
+          example: "Input should be greater than or equal to 0"
+        type:
+          type: string
+          example: "greater_than_equal"
+
+    ErrorResponse:
+      type: object
+      description: |
+        Unified FastAPI error contract returning `code`, `message`, `request_id`, `status`,
+        and FastAPI's native `detail` array.
+      required:
+        - code
+        - message
+        - status
+        - detail
+      properties:
+        code:
+          type: string
+          enum:
+            - VALIDATION_FAILED
+            - MODEL_NOT_READY
+            - NOT_FOUND
+            - INTERNAL_ERROR
+          example: "VALIDATION_FAILED"
+        message:
+          type: string
+          example: "Request validation failed on 1 field(s)."
+        request_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Echoed `request_id` (or `X-Correlation-Id`) when available
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        status:
+          type: integer
+          enum: [404, 422, 503, 500]
+          example: 422
+        detail:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationErrorItem"
