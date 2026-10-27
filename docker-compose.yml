@@ -10,10 +10,11 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./infra/docker/postgres/init-schemas.sql:/docker-entrypoint-initdb.d/init-schemas.sql:ro
     deploy:
       resources:
         limits:
-          memory: 384M
+          memory: 300M
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fintech_user} -d ${POSTGRES_DB:-fintech}"]
       interval: 10s
@@ -22,7 +23,7 @@ services:
     restart: unless-stopped
 
   minio:
-    image: minio/minio:latest
+    image: pgsty/silo:latest
     container_name: fintech-minio
     command: server /data --console-address ":9001"
     environment:
@@ -36,24 +37,24 @@ services:
     deploy:
       resources:
         limits:
-          memory: 384M
+          memory: 300M
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      test: ["CMD", "silo", "healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
   create-buckets:
-    image: minio/mc:latest
+    image: pgsty/mc:latest
     container_name: fintech-minio-init
     depends_on:
       minio:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      /usr/bin/mc alias set local http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-changeme_minio};
-      /usr/bin/mc mb --ignore-existing local/$${MINIO_BUCKET:-mlflow-artifacts};
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-changeme_minio};
+      mc mb --ignore-existing local/$${MINIO_BUCKET:-mlflow-artifacts};
       exit 0;
       "
     deploy:
@@ -62,7 +63,8 @@ services:
           memory: 64M
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.16.2
+    build: ./infra/docker/mlflow
+    image: fintech-mlflow:v2.16.2
     container_name: fintech-mlflow
     command: >
       mlflow server
@@ -86,7 +88,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 400M
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health')\" || exit 1"]
       interval: 15s
@@ -94,8 +96,49 @@ services:
       retries: 5
     restart: unless-stopped
 
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: fintech-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    deploy:
+      resources:
+        limits:
+          memory: 200M
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: fintech-mailpit
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    deploy:
+      resources:
+        limits:
+          memory: 80M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8025/api/v1/info || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
 volumes:
   postgres_data:
     name: fintech_postgres_data
   minio_data:
     name: fintech_minio_data
+  rabbitmq_data:
+    name: fintech_rabbitmq_data
