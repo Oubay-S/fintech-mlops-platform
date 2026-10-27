@@ -15,7 +15,7 @@
     "max_iter": 1000,
     "class_weight": null,
     "n_features": 14,
-    "train_seconds": 2.4855410830023175
+    "train_seconds": 2.6462834290014143
   },
   "test_metrics_at_0.5": {
     "threshold": 0.5,
@@ -54,10 +54,236 @@
     }
   },
   "calibration_threshold": 0.4073884220212019,
+  "subset_metrics": {
+    "all_types": {
+      "threshold": 0.5,
+      "accuracy": 0.9999897840826578,
+      "precision": 1.0,
+      "recall": 0.9920876445526476,
+      "f1": 0.9960281087687137,
+      "roc_auc": 0.99900628741455,
+      "pr_auc": 0.9975869495346895,
+      "mcc": 0.9960308712426549,
+      "brier": 7.1151604497793475e-06,
+      "predicted_positive_rate": 0.0012809188667561476,
+      "confusion_matrix": {
+        "tn": 1270881,
+        "fp": 0,
+        "fn": 13,
+        "tp": 1630
+      },
+      "name": "All types",
+      "rows": 1272524,
+      "frauds": 1643,
+      "fraud_rate": 0.0012911347840983745
+    },
+    "transfer": {
+      "threshold": 0.5,
+      "accuracy": 0.9999061270851521,
+      "precision": 1.0,
+      "recall": 0.9881656804733728,
+      "f1": 0.9940476190476191,
+      "roc_auc": 0.9998545485737105,
+      "pr_auc": 0.9988888537203168,
+      "mcc": 0.9940182018613707,
+      "brier": 5.6807392876573695e-05,
+      "predicted_positive_rate": 0.007838388389797892,
+      "confusion_matrix": {
+        "tn": 105682,
+        "fp": 0,
+        "fn": 10,
+        "tp": 835
+      },
+      "name": "TRANSFER",
+      "rows": 106527,
+      "frauds": 845,
+      "fraud_rate": 0.00793226130464577
+    },
+    "cash_out": {
+      "threshold": 0.5,
+      "accuracy": 0.9999932914871208,
+      "precision": 1.0,
+      "recall": 0.9962406015037594,
+      "f1": 0.9981167608286252,
+      "roc_auc": 0.9987730277316854,
+      "pr_auc": 0.9962750842321849,
+      "mcc": 0.9981151768751091,
+      "brier": 6.708748143027259e-06,
+      "predicted_positive_rate": 0.0017777559129950602,
+      "confusion_matrix": {
+        "tn": 446395,
+        "fp": 0,
+        "fn": 3,
+        "tp": 795
+      },
+      "name": "CASH_OUT",
+      "rows": 447193,
+      "frauds": 798,
+      "fraud_rate": 0.001784464425874287
+    },
+    "in_scope": {
+      "threshold": 0.5,
+      "accuracy": 0.999976522430109,
+      "precision": 1.0,
+      "recall": 0.9920876445526476,
+      "f1": 0.9960281087687137,
+      "roc_auc": 0.9991923180694654,
+      "pr_auc": 0.9976480838172043,
+      "mcc": 0.9960242386500961,
+      "brier": 1.634693771091446e-05,
+      "predicted_positive_rate": 0.0029437260709383804,
+      "confusion_matrix": {
+        "tn": 552077,
+        "fp": 0,
+        "fn": 13,
+        "tp": 1630
+      },
+      "name": "TRANSFER + CASH_OUT",
+      "rows": 553720,
+      "frauds": 1643,
+      "fraud_rate": 0.0029672036408293
+    },
+    "app_valid": {
+      "threshold": 0.5,
+      "accuracy": 0.9998402811052548,
+      "precision": 1.0,
+      "recall": 0.9944987775061125,
+      "f1": 0.9972418020226785,
+      "roc_auc": 1.0,
+      "pr_auc": 1.0,
+      "mcc": 0.9971635846772632,
+      "brier": 8.339451071552935e-05,
+      "predicted_positive_rate": 0.02887362686116879,
+      "confusion_matrix": {
+        "tn": 54713,
+        "fp": 0,
+        "fn": 9,
+        "tp": 1627
+      },
+      "name": "App-valid (in-scope, valid amount)",
+      "rows": 56349,
+      "frauds": 1636,
+      "fraud_rate": 0.029033345755914035
+    },
+    "rule_positive": {
+      "threshold": 0.5,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "roc_auc": null,
+      "pr_auc": null,
+      "mcc": 0.0,
+      "brier": 3.885104316301193e-10,
+      "predicted_positive_rate": 1.0,
+      "confusion_matrix": {
+        "tn": 0,
+        "fp": 0,
+        "fn": 0,
+        "tp": 1608
+      },
+      "name": "Rule-positive (app-valid)",
+      "rows": 1608,
+      "frauds": 1608,
+      "fraud_rate": 1.0
+    },
+    "hard_subset": {
+      "threshold": 0.5,
+      "accuracy": 0.9998355894119582,
+      "precision": 1.0,
+      "recall": 0.6785714285714286,
+      "f1": 0.8085106382978723,
+      "roc_auc": 1.0,
+      "pr_auc": 0.9999999999999999,
+      "mcc": 0.8236867277719306,
+      "brier": 8.584418734741036e-05,
+      "predicted_positive_rate": 0.0003470890191995031,
+      "confusion_matrix": {
+        "tn": 54713,
+        "fp": 0,
+        "fn": 9,
+        "tp": 19
+      },
+      "name": "Hard subset (app-valid)",
+      "rows": 54741,
+      "frauds": 28,
+      "fraud_rate": 0.000511499607241373
+    }
+  },
+  "rule_baseline": {
+    "all_serving": {
+      "rows": 553720,
+      "selected": 1611,
+      "tp": 1611,
+      "fp": 0,
+      "fn": 32,
+      "tn": 552077,
+      "precision": 1.0,
+      "recall": 0.9805234327449787,
+      "f1": 0.9901659496004916
+    },
+    "app_valid": {
+      "rows": 56349,
+      "selected": 1608,
+      "tp": 1608,
+      "fp": 0,
+      "fn": 28,
+      "tn": 54713,
+      "precision": 1.0,
+      "recall": 0.9828850855745721,
+      "f1": 0.9913686806411837
+    }
+  },
+  "serving_consistent": {
+    "app_valid": {
+      "threshold": 0.5,
+      "accuracy": 0.9996628156666489,
+      "precision": 1.0,
+      "recall": 0.9883863080684596,
+      "f1": 0.994159237626806,
+      "roc_auc": 1.0,
+      "pr_auc": 1.0,
+      "mcc": 0.9940036185158253,
+      "brier": 0.00017541802092974044,
+      "predicted_positive_rate": 0.028696161422562955,
+      "confusion_matrix": {
+        "tn": 54713,
+        "fp": 0,
+        "fn": 19,
+        "tp": 1617
+      },
+      "name": "App-valid, serving-consistent",
+      "rows": 56349,
+      "frauds": 1636,
+      "fraud_rate": 0.029033345755914035
+    },
+    "hard_subset": {
+      "threshold": 0.5,
+      "accuracy": 0.9996529109808004,
+      "precision": 1.0,
+      "recall": 0.32142857142857145,
+      "f1": 0.4864864864864865,
+      "roc_auc": 1.0,
+      "pr_auc": 0.9999999999999999,
+      "mcc": 0.5668482943042157,
+      "brier": 0.00018057085985836662,
+      "predicted_positive_rate": 0.0001644105880418699,
+      "confusion_matrix": {
+        "tn": 54713,
+        "fp": 0,
+        "fn": 19,
+        "tp": 9
+      },
+      "name": "Hard subset, serving-consistent",
+      "rows": 54741,
+      "frauds": 28,
+      "fraud_rate": 0.000511499607241373
+    }
+  },
   "inference_timing": {
-    "batch_ms_per_row": 3.0507519986713306e-05,
-    "single_p50_ms": 0.08565700045437552,
-    "single_p95_ms": 0.09142984854406676,
+    "batch_ms_per_row": 2.4885300008463672e-05,
+    "single_p50_ms": 0.07367600028374,
+    "single_p95_ms": 0.07750100003249825,
     "single_n": 500
   },
   "ablation_probe_lr": {

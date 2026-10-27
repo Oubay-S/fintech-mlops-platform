@@ -63,15 +63,16 @@ PROCESSED_DIR = ML_DIR / "data" / "processed"
 
 def metrics_at(y_true: np.ndarray, probs: np.ndarray, threshold: float = 0.5) -> dict:
     predicted = (probs >= threshold).astype(int)
-    tn, fp, fn, tp = confusion_matrix(y_true, predicted).ravel()
+    tn, fp, fn, tp = confusion_matrix(y_true, predicted, labels=[0, 1]).ravel()
+    has_both_classes = len(np.unique(y_true)) == 2
     return {
         "threshold": float(threshold),
         "accuracy": float(accuracy_score(y_true, predicted)),
         "precision": float(precision_score(y_true, predicted, zero_division=0)),
         "recall": float(recall_score(y_true, predicted, zero_division=0)),
         "f1": float(f1_score(y_true, predicted, zero_division=0)),
-        "roc_auc": float(roc_auc_score(y_true, probs)),
-        "pr_auc": float(average_precision_score(y_true, probs)),
+        "roc_auc": float(roc_auc_score(y_true, probs)) if has_both_classes else None,
+        "pr_auc": float(average_precision_score(y_true, probs)) if has_both_classes else None,
         "mcc": float(matthews_corrcoef(y_true, predicted)),
         "brier": float(brier_score_loss(y_true, probs)),
         "predicted_positive_rate": float(predicted.mean()),
@@ -86,6 +87,53 @@ def best_f1_threshold(y_true: np.ndarray, probs: np.ndarray) -> float:
     if index >= len(thresholds):
         index = len(thresholds) - 1
     return float(thresholds[index])
+
+
+def fmt_metric(value, digits: int = 4) -> str:
+    return "n/a" if value is None else f"{value:.{digits}f}"
+
+
+def subset_metrics(df, probs: np.ndarray, mask: np.ndarray, name: str, threshold: float = 0.5) -> dict:
+    """Metrics on a boolean slice of the test frame."""
+    y = df.loc[mask, TARGET].to_numpy()
+    result = metrics_at(y, probs[mask], threshold=threshold)
+    result.update(
+        {
+            "name": name,
+            "rows": int(len(y)),
+            "frauds": int(y.sum()),
+            "fraud_rate": float(y.mean()) if len(y) else 0.0,
+        }
+    )
+    return result
+
+
+def rule_baseline(df, mask: np.ndarray) -> dict:
+    """The deterministic PaySim rule as a model: amount == oldbalanceOrg, within a slice."""
+    subset = df.loc[mask]
+    y = subset[TARGET].to_numpy()
+    selected = (
+        (subset["amount"] == subset["oldbalanceOrg"])
+        & subset["type"].isin(["TRANSFER", "CASH_OUT"])
+    ).to_numpy()
+    tp = int((selected & (y == 1)).sum())
+    fp = int((selected & (y == 0)).sum())
+    fn = int((~selected & (y == 1)).sum())
+    tn = int((~selected & (y == 0)).sum())
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    return {
+        "rows": int(len(y)),
+        "selected": int(selected.sum()),
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "tn": tn,
+        "precision": float(precision),
+        "recall": float(recall),
+        "f1": float(f1),
+    }
 
 
 def ablation_probe(features_fit, features_cal, features_test, y_fit, y_cal, y_test) -> dict:
@@ -289,6 +337,46 @@ def main() -> None:
     probs_cal = model.predict_proba(X_cal)[:, 1]
     probs_test = model.predict_proba(X_test)[:, 1]
 
+    # ---- slices: in-scope, app-valid, rule baseline, serving-consistent ----
+    serving_mask = test_df["type"].isin(["TRANSFER", "CASH_OUT"]).to_numpy()
+    valid_mask = (
+        serving_mask
+        & (test_df["amount"] > 0).to_numpy()
+        & (test_df["amount"] <= test_df["oldbalanceOrg"]).to_numpy()
+    )
+    rule_mask = serving_mask & (test_df["amount"] == test_df["oldbalanceOrg"]).to_numpy()
+    hard_mask = serving_mask & ~rule_mask
+
+    subset_results = {
+        "all_types": subset_metrics(test_df, probs_test, np.ones(len(test_df), dtype=bool), "All types"),
+        "transfer": subset_metrics(test_df, probs_test, (test_df["type"] == "TRANSFER").to_numpy(), "TRANSFER"),
+        "cash_out": subset_metrics(test_df, probs_test, (test_df["type"] == "CASH_OUT").to_numpy(), "CASH_OUT"),
+        "in_scope": subset_metrics(test_df, probs_test, serving_mask, "TRANSFER + CASH_OUT"),
+        "app_valid": subset_metrics(test_df, probs_test, valid_mask, "App-valid (in-scope, valid amount)"),
+        "rule_positive": subset_metrics(
+            test_df, probs_test, rule_mask & valid_mask, "Rule-positive (app-valid)"
+        ),
+        "hard_subset": subset_metrics(
+            test_df, probs_test, hard_mask & valid_mask, "Hard subset (app-valid)"
+        ),
+    }
+    rule_results = {
+        "all_serving": rule_baseline(test_df, serving_mask),
+        "app_valid": rule_baseline(test_df, valid_mask),
+    }
+    consistent_df = test_df.copy()
+    consistent_df["newbalanceOrig"] = consistent_df["oldbalanceOrg"] - consistent_df["amount"]
+    consistent_df["newbalanceDest"] = consistent_df["oldbalanceDest"] + consistent_df["amount"]
+    probs_consistent = model.predict_proba(preprocessor.transform(build_features(consistent_df)))[:, 1]
+    consistent_results = {
+        "app_valid": subset_metrics(
+            test_df, probs_consistent, valid_mask, "App-valid, serving-consistent"
+        ),
+        "hard_subset": subset_metrics(
+            test_df, probs_consistent, hard_mask & valid_mask, "Hard subset, serving-consistent"
+        ),
+    }
+
     calibration_threshold = best_f1_threshold(y_cal, probs_cal)
     metrics_05 = metrics_at(y_test, probs_test, threshold=0.5)
     metrics_cal = metrics_at(y_test, probs_test, threshold=calibration_threshold)
@@ -323,6 +411,9 @@ def main() -> None:
         "test_metrics_at_0.5": metrics_05,
         "test_metrics_at_calibration_threshold": metrics_cal,
         "calibration_threshold": calibration_threshold,
+        "subset_metrics": subset_results,
+        "rule_baseline": rule_results,
+        "serving_consistent": consistent_results,
         "inference_timing": timing,
         "ablation_probe_lr": ablation,
         "majority_class_accuracy": majority_accuracy,
@@ -358,11 +449,65 @@ def main() -> None:
         rows.append("")
         rows.append(
             "The full contract model is near-perfect because the new-balance/equality "
-            "features encode the simulator's drain rule; without them the task becomes "
-            "genuinely hard. The Phase-4 benchmark will repeat this ablation for all five "
-            "algorithms."
+            "features encode the simulator's drain rule. The restricted set removes those "
+            "features but still contains `amount` and `sender_old_balance`, which define the "
+            "rule; a tree can approximate the equality boundary, so the LR-only drop is not "
+            "sufficient evidence. Phase 4 adds a rule-blind protocol and the hard-subset "
+            "table for all five algorithms."
         )
         ablation_section = "\n".join(rows)
+
+    slice_lines = [
+        "## Slice metrics — threshold 0.5",
+        "",
+        "| Slice | Rows | Frauds | Fraud rate | ROC-AUC | PR-AUC | Recall | Precision | F1 |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for key in ["all_types", "transfer", "cash_out", "in_scope", "app_valid", "rule_positive", "hard_subset"]:
+        result = subset_results[key]
+        slice_lines.append(
+            f"| {result['name']} | {result['rows']:,} | {result['frauds']:,} | "
+            f"{result['fraud_rate']*100:.4f}% | {fmt_metric(result['roc_auc'])} | "
+            f"{fmt_metric(result['pr_auc'])} | {result['recall']:.4f} | "
+            f"{result['precision']:.4f} | {result['f1']:.4f} |"
+        )
+    slice_lines += [
+        "",
+        "**Read this table carefully.** `App-valid` applies the app's validation (`amount > 0`, "
+        "`amount <= sender_old_balance`) and is the serving estimate; the full `TRANSFER + CASH_OUT` "
+        "slice includes rows the app rejects before ML. `Rule-positive` is the deterministic "
+        "`amount == sender_old_balance` subset; `Hard subset` is the rule-negative remainder.",
+    ]
+    slice_section = "\n".join(slice_lines)
+
+    rule_lines = [
+        "## Rule baseline — deterministic `amount == sender_old_balance`",
+        "",
+        "| Population | Selected | TP | FP | Precision | Recall | F1 |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    for key, label in [("all_serving", "All serving (TRANSFER + CASH_OUT)"), ("app_valid", "App-valid")]:
+        result = rule_results[key]
+        rule_lines.append(
+            f"| {label} | {result['selected']:,} | {result['tp']:,} | {result['fp']:,} | "
+            f"{result['precision']:.4f} | {result['recall']:.4f} | {result['f1']:.4f} |"
+        )
+    rule_section = "\n".join(rule_lines)
+
+    consistent_lines = [
+        "## Serving-consistent balances — app-computed `new = old ± amount`",
+        "",
+        "| Slice | Rows | Frauds | ROC-AUC | PR-AUC | Recall | Precision | F1 |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for key, label in [("app_valid", "App-valid"), ("hard_subset", "Hard subset (app-valid)")]:
+        result = consistent_results[key]
+        consistent_lines.append(
+            f"| {label} | {result['rows']:,} | {result['frauds']:,} | "
+            f"{fmt_metric(result['roc_auc'])} | {fmt_metric(result['pr_auc'])} | "
+            f"{result['recall']:.4f} | {result['precision']:.4f} | {result['f1']:.4f} |"
+        )
+    consistent_section = "\n".join(consistent_lines)
 
     report = f"""# Logistic Regression Baseline — {'sample' if args.sample else 'full data'}
 
@@ -407,6 +552,12 @@ Best F1 threshold on the **calibration** set: **{calibration_threshold:.4f}**.
 | F1 | {metrics_cal['f1']:.4f} |
 | MCC | {metrics_cal['mcc']:.4f} |
 
+{slice_section}
+
+{rule_section}
+
+{consistent_section}
+
 {ablation_section}
 
 ## Inference timing
@@ -428,9 +579,12 @@ Best F1 threshold on the **calibration** set: **{calibration_threshold:.4f}**.
 ## Interpretation
 
 - PaySim's near-deterministic drain rule makes a linear baseline very strong; high scores are expected and are a **dataset property**, not evidence of real-world capability.
+- **The app-valid slice is the serving estimate.** The app's `available >= amount` validation removes ~90% of PaySim rows before ML; the remaining traffic has a **2.903%** fraud rate (not 0.129%). The full `TRANSFER + CASH_OUT` slice is a sensitivity, not the serving population.
+- **The rule baseline is precision 1.0 / recall 0.9805 (all serving test) / 0.9829 (app-valid test).** The hard subset (rule-negative frauds) is the real test of the model; the headline AUC is the rule.
+- **Serving-consistent balances matter.** The app computes `new = old ± amount`; on the app-valid hard subset the recall falls from 0.679 (raw PaySim balances) to 0.321. Report the serving-consistent number, not only the raw one.
 - The calibration curve and Brier score are reported as-is; class weighting/resampling is evaluated in the Phase 4 benchmark, not hidden in the baseline.
-- The threshold 0.5 is arbitrary under 0.129% prevalence; the calibration-selected threshold above is a first honest operating point. The final policy (allow/decline/review) will use conformal prediction sets in Phase 6.
-- Next: Phase 4 — five algorithms (LR, RF, XGBoost, SVM, MLP), repeated CV × seeds, plus the restricted ablation without new-balance fields.
+- The threshold 0.5 is arbitrary under 2.903% app-valid prevalence; the calibration-selected threshold above is a first honest operating point. The final policy (allow/decline/review) will use Mondrian conformal prediction sets in Phase 6.
+- Next: Phase 4 — five algorithms (LR, RF, XGBoost, SVM, MLP), paired CV × seeds, contract/restricted/rule-blind protocols, and the app-valid hard-subset table.
 
 ## Artifacts
 
