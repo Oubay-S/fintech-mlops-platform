@@ -1,0 +1,60 @@
+{
+  "confidence_level": 0.99,
+  "q_hat_fraud": 0.5191,
+  "q_hat_legit": 7e-05,
+  "target_review_rate": 0.05,
+  "method": "mondrian_conformal",
+  "schema_version": "1.0",
+  "contract_features": [
+    "type",
+    "amount",
+    "sender_old_balance",
+    "sender_new_balance",
+    "receiver_old_balance",
+    "receiver_new_balance"
+  ],
+  "derived_features": [
+    "balance_drain_ratio",
+    "receiver_gain_ratio",
+    "sender_zero_after",
+    "amount_equals_old_balance"
+  ],
+  "model_feature_names": [
+    "amount",
+    "sender_old_balance",
+    "sender_new_balance",
+    "receiver_old_balance",
+    "receiver_new_balance",
+    "balance_drain_ratio",
+    "receiver_gain_ratio",
+    "sender_zero_after",
+    "amount_equals_old_balance",
+    "type_CASH_IN",
+    "type_CASH_OUT",
+    "type_DEBIT",
+    "type_PAYMENT",
+    "type_TRANSFER"
+  ],
+  "algorithm": "LogisticRegression",
+  "trained_at": "2026-10-27T01:39:48.501176+00:00",
+  "metrics_summary": {
+    "roc_auc": 1.0,
+    "pr_auc": 1.0,
+    "f1": 0.99724,
+    "precision": 1.0,
+    "recall": 0.9945,
+    "mcc": 0.99716,
+    "brier_score": 8.34e-05,
+    "expected_review_rate": 0.04286,
+    "inference_p95_ms": 0.0775,
+    "app_valid_prevalence": 0.02903,
+    "hard_subset_recall": 0.67857,
+    "serving_consistent_hard_subset_recall": 0.32143,
+    "rule_baseline_recall": 0.98289
+  },
+  "dataset_version": "paysim",
+  "feature_list_version": "1.1",
+  "eval_population": "app-valid TRANSFER+CASH_OUT",
+  "calibration_rows": 45253,
+  "calibration_frauds": 1311
+}

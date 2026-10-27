@@ -48,8 +48,19 @@ def add_derived_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Contract mapping + derived features (model input frame)."""
+    """PaySim columns -> contract names -> derived features (training input frame)."""
     return add_derived_features(to_contract_frame(df))
+
+
+def build_serving_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Contract-named frame -> derived features (serving input frame).
+
+    The serving layer receives the six contract fields (``sender_old_balance``,
+    etc.), not PaySim column names, so it must NOT call ``build_features``
+    (which expects ``oldbalanceOrg``, ...). This function is the serving-safe
+    counterpart of ``build_features``; both produce the same 10 columns.
+    """
+    return add_derived_features(df)
 
 
 def build_target(df: pd.DataFrame) -> pd.Series:

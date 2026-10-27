@@ -60,6 +60,14 @@ pytest ml/training/tests -q
 
 The frozen `/predict` feature contract is `ml/training/docs/feature_list_v1.md` (v1.1, 27 Oct). It defines the six app fields, the four derived features, the call timing (one score at transfer creation; no preview/fingerprint), and the evaluation protocol.
 
+## MLflow artifact contract (Role 4 → Role 5)
+
+- Implementation: `ml/common/artifact_contract.py` — `UncertaintyConfig`, `prediction_set`, `suggested_action`, `log_pipeline`.
+- The registered `sklearn.pipeline.Pipeline` starts at `build_preprocessor()` and expects the **10-column** frame. Serving must call `ml.common.preprocessing.build_serving_features(raw_six_fields)` first; `build_features()` is the PaySim-column training counterpart and would fail on a contract-named payload.
+- The companion `uncertainty_config.json` carries `confidence_level`, `q_hat_fraud`, `q_hat_legit`, `target_review_rate`, the feature lists, the metrics summary, and `eval_population`.
+- Example: `ml/training/docs/uncertainty_config.example.json` (illustrative values; regenerate from the final model in Phase 6).
+- The written contract is `mlflow-artifact-contract.md` at the project root (serving-authored).
+
 ## Evaluation protocols
 
 - **Primary:** stratified random 80/20 split (seed 42) — used for the benchmark and the statistics. Report **in-scope** (`TRANSFER` + `CASH_OUT`) and **app-valid** (`amount > 0`, `amount <= sender_old_balance`) metrics; the app-valid population is the serving estimate (2.903% fraud in the baseline test split).
