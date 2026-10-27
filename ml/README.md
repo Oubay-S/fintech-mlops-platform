@@ -13,7 +13,7 @@ ml/
 │   └── preprocessing.py  # contract mapping, derived features, temporal split
 ├── training/
 │   ├── eda/           # exploratory analysis scripts
-│   ├── docs/          # EDA report, figures, dataset decision note
+│   ├── docs/          # EDA report, figures, dataset decision, feature list v1.1
 │   └── tests/         # pytest for the shared module (drift guard)
 ├── visualization/     # PCA / t-SNE / UMAP exports (Role 4)
 ├── load-tests/        # Locust scenarios (Role 4)
@@ -56,11 +56,16 @@ python -m ml.training.scripts.run_baseline --sample
 pytest ml/training/tests -q
 ```
 
+## Contract
+
+The frozen `/predict` feature contract is `ml/training/docs/feature_list_v1.md` (v1.1, 27 Oct). It defines the six app fields, the four derived features, the call timing (one score at transfer creation; no preview/fingerprint), and the evaluation protocol.
+
 ## Evaluation protocols
 
-- **Primary:** stratified random 80/20 split (seed 42) — used for the benchmark and the statistics.
-- **Robustness:** temporal holdout (later 20% of rows by `step`, no hour overlap) — used only to quantify drift; never for fitting or model selection.
-- **Calibration:** 20% of the primary training set (stratified), reserved for split conformal prediction.
+- **Primary:** stratified random 80/20 split (seed 42) — used for the benchmark and the statistics. Report **in-scope** (`TRANSFER` + `CASH_OUT`) and **app-valid** (`amount > 0`, `amount <= sender_old_balance`) metrics; the app-valid population is the serving estimate (2.903% fraud in the baseline test split).
+- **Robustness:** temporal holdout (later 20% of rows by `step`, no hour overlap) and a **destination-disjoint** holdout (group split by `nameDest`); sender-disjoint is trivial on PaySim (99.85% unique senders).
+- **Calibration:** 20% of the primary training set (stratified), reserved for **class-conditional (Mondrian)** conformal prediction on the in-scope/app-valid population.
+- **Baseline evidence:** the report includes the rule baseline, the rule-negative hard subset, and the serving-consistent balance variant; the headline ROC-AUC is a dataset property.
 
 JupyterLab is installed on the workstation. From the repository root:
 

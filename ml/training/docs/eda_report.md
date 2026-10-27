@@ -1,7 +1,7 @@
 # PaySim — EDA Report (first pass)
 
 **Generated:** 2026-10-21 · **Script:** `ml/training/eda/eda_profile.py`
-**Dataset:** `/home/soulaymane/dev/JEE & ML/fintech-mlops-platform/ml/data/paysim/paysim.parquet`
+**Dataset:** `ml/data/paysim/paysim.parquet` (git-ignored)
 
 ## 1. Shape and quality
 
