@@ -91,3 +91,8 @@ k8s/**/secret.yaml
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+
+#MLSERVING&MlOps roadmap file
+MLOPS_SERVING_ROADMAP.md
+MLOPS_ROLE_PLAN.md

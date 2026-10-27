@@ -6,10 +6,11 @@ info:
     model metadata, and embedding visualization service for the High-Availability MLOps FinTech Platform.
 
     ### Integration & Security Architecture (`APPLICATION_CONCEPTION_PLAN V2.1` Sections 17 & 24.3)
-    - **Network Isolation (Inter-Service Security):** This service is strictly **cluster-internal** (`http://ml-serving:8000`), isolated via Kubernetes `NetworkPolicies`, and never exposed through the public API Gateway or Ingress. Only the Spring Boot **`risk-service` (`:8084`)** and **Prometheus** may reach it. An optional `X-Internal-Api-Key` header is supported when internal token enforcement is enabled via environment configuration.
+    - **Strict ML-Only Readiness (Zero Heuristic Fallback):** Only trained ML models loaded from the MLflow Model Registry (`alias = production`) are served. While the model is loading or if MLflow/MinIO is unreachable at startup, `/health/ready`, `/predict`, and `/model-info` return HTTP `503` with `ErrorResponse` (`code: MODEL_NOT_READY`), triggering Rule R2 fail-safe in `risk-service`.
+    - **Network Isolation (Inter-Service Security):** This service is strictly **cluster-internal** (`http://ml-serving:8000`), isolated via Kubernetes `NetworkPolicies`, and never exposed through the public API Gateway or Ingress. Only the Spring Boot **`risk-service` (`:8084`)** and **Prometheus** may reach it. When `INTERNAL_API_KEY` is configured, protected endpoints verify `X-Internal-Api-Key` using constant-time comparison (`secrets.compare_digest`); `/health/*` and `/metrics` are exempt.
     - **Latency Target:** p95 inference `< 300 ms` (`risk-service` read timeout: `1500 ms`, connect timeout: `500 ms`, 1 retry).
     - **Dataset Contract:** PaySim 6-feature inference contract (`type`, `amount`, `sender_old_balance`, `sender_new_balance`, `receiver_old_balance`, `receiver_new_balance`).
-    - **Derived Features (computed internally by ML Serving via `ml/common/preprocessing.py`):** `balance_drain_ratio`, `receiver_gain_ratio`, `sender_zero_after`, `amount_equals_old_balance`.
+    - **Derived Features (computed internally via `ml.common.preprocessing.build_features`):** `balance_drain_ratio`, `receiver_gain_ratio`, `sender_zero_after`, `amount_equals_old_balance`.
   version: "1.0.0"
   contact:
     name: Role 5 — MLOps & ML Serving Engineer
@@ -37,14 +38,14 @@ paths:
         - Prediction
       summary: Score a financial transaction for fraud risk and conformal uncertainty
       description: |
-        Evaluates a single transaction using the active `Production` (`@production` alias) model loaded
-        from the MLflow Model Registry (or the deterministic `Fallback` baseline if offline).
+        Evaluates a single transaction using the active `@production` model loaded
+        from the MLflow Model Registry. Executed synchronously in FastAPI's worker threadpool.
 
         **Conformal `prediction_set` Semantics & Risk Service Policy (`APPLICATION_CONCEPTION_PLAN V2.1` Section 11.7):**
         - `["fraud"]` -> Confident Fraud -> Rule R3 (`REJECTED` / `MODEL_HIGH_RISK`, suggested action: `BLOCK`)
         - `["legit"]` -> Confident Legitimate -> Rule R5 (`PENDING_REVIEW` if `amount >= high_amount_threshold`) or Rule R6 (`APPROVED`, suggested action: `ALLOW`)
-        - `["legit", "fraud"]` -> Ambiguous / Both classes plausible -> Rule R4 (`PENDING_REVIEW` / `MODEL_UNCERTAIN`, suggested action: `HUMAN_REVIEW`)
-        - `[]` (empty set) -> Neither class meets conformal threshold (out-of-distribution / high epistemic uncertainty) -> Rule R4 (`PENDING_REVIEW` / `MODEL_UNCERTAIN`, suggested action: `HUMAN_REVIEW`)
+        - `["legit", "fraud"]` -> Ambiguous / Both classes plausible -> Rule R4 (`PENDING_REVIEW` / `MODEL_UNCERTAIN`, suggested action: `HUMAN_REVIEW`, metric reason: `ambiguous_set`)
+        - `[]` (empty set) -> Neither class meets conformal threshold -> Rule R4 (`PENDING_REVIEW` / `MODEL_UNCERTAIN`, suggested action: `HUMAN_REVIEW`, metric reason: `empty_set`)
 
         *Note:* `action` (`ALLOW`, `BLOCK`, `HUMAN_REVIEW`) is a suggestion only; `risk-service` owns and enforces the final decision policy (Rules R1–R6).
       operationId: predictTransaction
@@ -52,6 +53,13 @@ paths:
         - InternalApiKey: []
         - {}
       parameters:
+        - in: header
+          name: X-Request-ID
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Optional request correlation UUID echoed in `X-Request-ID` response header
         - in: header
           name: X-Correlation-Id
           required: false
@@ -106,6 +114,11 @@ paths:
         "200":
           description: Transaction successfully scored
           headers:
+            X-Request-ID:
+              schema:
+                type: string
+                format: uuid
+              description: Echoed request correlation ID
             X-Correlation-Id:
               schema:
                 type: string
@@ -191,8 +204,23 @@ paths:
                       - feature: "balance_drain_ratio"
                         contribution: 0.44
                     inference_ms: 5.1
+        "401":
+          description: Missing or invalid X-Internal-Api-Key when INTERNAL_API_KEY is configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                unauthorized:
+                  summary: Invalid or missing X-Internal-Api-Key (HTTP 401)
+                  value:
+                    code: "UNAUTHORIZED"
+                    message: "Invalid or missing X-Internal-Api-Key header."
+                    request_id: "550e8400-e29b-41d4-a716-446655440000"
+                    status: 401
+                    detail: []
         "422":
-          description: Validation error (missing contract features, negative balance/amount, unsupported schema_version, or invalid transaction type)
+          description: Validation error (missing contract features, extra fields, NaN/Inf, negative balance/amount, unsupported schema_version, or invalid transaction type)
           content:
             application/json:
               schema:
@@ -209,6 +237,17 @@ paths:
                       - loc: ["body", "features", "amount"]
                         msg: "Input should be greater than or equal to 0"
                         type: "greater_than_equal"
+                unsupported_schema:
+                  summary: Unsupported major schema_version (HTTP 422)
+                  value:
+                    code: "UNSUPPORTED_SCHEMA_VERSION"
+                    message: "Unsupported schema_version '2.0'. Expected pattern '^1\\.[0-9]+$'."
+                    request_id: "550e8400-e29b-41d4-a716-446655440000"
+                    status: 422
+                    detail:
+                      - loc: ["body", "schema_version"]
+                        msg: "Value error, Unsupported schema_version '2.0'. Expected pattern '^1\\.[0-9]+$'."
+                        type: "value_error"
         "503":
           description: Model not yet loaded or service temporarily unavailable
           content:
@@ -220,7 +259,7 @@ paths:
                   summary: Model still warming up on startup (HTTP 503)
                   value:
                     code: "MODEL_NOT_READY"
-                    message: "Model artifact is still loading; readiness probe is not yet ready."
+                    message: "Model artifact is not loaded yet; readiness probe is not ready."
                     request_id: "550e8400-e29b-41d4-a716-446655440000"
                     status: 503
                     detail: []
@@ -249,9 +288,9 @@ paths:
       summary: Canonical Kubernetes readiness probe
       description: |
         **Canonical readiness path for Kubernetes manifests (`readinessProbe`).**
-        Returns HTTP 200 **only after** the model artifact (from MLflow Registry or local fallback)
-        and shared preprocessor are loaded in memory and ready to serve `/predict`.
-        Returns HTTP 503 during startup warmup or if model initialization failed.
+        Returns HTTP 200 **only after** a trained ML model artifact and `uncertainty_config.json`
+        are loaded in memory from MLflow Registry and ready to serve `/predict`.
+        Returns HTTP 503 (`ErrorResponse` with `code: MODEL_NOT_READY`) during startup warmup or if MLflow is unreachable.
       operationId: healthReady
       responses:
         "200":
@@ -265,7 +304,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthReadyResponse"
+                $ref: "#/components/schemas/ErrorResponse"
 
   /health:
     get:
@@ -307,7 +346,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthReadyResponse"
+                $ref: "#/components/schemas/ErrorResponse"
 
   /model-info:
     get:
@@ -316,8 +355,11 @@ paths:
       summary: Retrieve active model metadata, evaluation metrics, and conformal configuration
       description: |
         Called by `risk-service` (`GET /risk/model-info`) to populate the Analyst and Admin
-        ML Analytics dashboard tab.
+        ML Analytics dashboard tab. Returns HTTP 503 (`MODEL_NOT_READY`) if no model is loaded.
       operationId: getModelInfo
+      security:
+        - InternalApiKey: []
+        - {}
       responses:
         "200":
           description: Active model information
@@ -325,6 +367,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ModelInfoResponse"
+        "401":
+          description: Missing or invalid X-Internal-Api-Key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Model is not loaded yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /viz/{method}:
     get:
@@ -333,24 +387,23 @@ paths:
       x-status: planned
       summary: Retrieve precomputed 2D embedding coordinates (PCA, t-SNE, UMAP)
       description: |
-        **Implementation Priority:** Phase 2 (`x-status: planned` — stubbed with sample points in Milestone 1, populated with full offline embeddings in Milestone 2).
+        **Implementation Priority:** Phase 2 (`x-status: planned`).
 
         Called by `risk-service` (`GET /risk/viz/{method}`) to render the interactive 2D scatter plot
         of legitimate vs. fraudulent clusters, classification errors, and uncertain points.
-        Embeddings are precomputed offline and capped (default ~2,000 points, max 10,000 points) so `risk-service`
-        never proxies multi-megabyte payloads.
+        Reads precomputed static JSON from `VIZ_DATA_DIR` (`{method}.json` produced by Role 4) and caps
+        returned points at `~2,000` points so `risk-service` never proxies multi-megabyte payloads.
       operationId: getVisualizationEmbeddings
+      security:
+        - InternalApiKey: []
+        - {}
       parameters:
         - in: path
           name: method
           required: true
           schema:
-            type: string
-            enum:
-              - pca
-              - tsne
-              - umap
-          description: Dimensionality reduction method
+            $ref: "#/components/schemas/VizMethod"
+          description: Dimensionality reduction method (`pca`, `tsne`, `umap`)
       responses:
         "200":
           description: Precomputed 2D embedding points and metadata
@@ -358,8 +411,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmbeddingVizResponse"
+        "401":
+          description: Missing or invalid X-Internal-Api-Key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Embedding method not found or artifact not yet generated
+          description: Embedding artifact not yet generated in VIZ_DATA_DIR
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Visualization data store unavailable
           content:
             application/json:
               schema:
@@ -371,13 +436,17 @@ paths:
         - Observability
       summary: Prometheus metrics scrape endpoint
       description: |
-        Exposes standard HTTP metrics and custom ML metrics in Prometheus text exposition format:
-        - `ml_inference_duration_seconds` (Histogram — model inference latency)
+        Exposes HTTP metrics (keyed by route template) and custom ML metrics in Prometheus text exposition format:
+        - `ml_http_requests_total{method, route, status}` (Counter)
+        - `ml_http_request_duration_seconds{method, route}` (Histogram)
+        - `ml_ready` (Gauge — `1` when model is loaded and ready, `0` otherwise)
+        - `ml_model_load_seconds` (Gauge — duration of last successful model load)
+        - `ml_inference_duration_seconds{model_version}` (Histogram — pure model inference latency)
         - `ml_predictions_total{action, prediction_set, model_version}` (Counter — total predictions by outcome)
-        - `ml_human_review_requests_total{model_version, reason}` (Counter — predictions routed to `HUMAN_REVIEW` due to conformal uncertainty `["legit", "fraud"]` or `[]`; drives the `HighMLUncertaintyRate` alert rule)
-        - `ml_prediction_set_size` (Histogram — distribution of conformal set sizes `0`, `1`, `2`)
-        - `ml_uncertainty_score` (Histogram — distribution of scalar uncertainty scores in `[0, 1]`)
-        - `ml_model_info{model_name, version, stage, alias}` (Gauge — active model metadata)
+        - `ml_human_review_requests_total{model_version, reason}` (Counter — finite `reason` labels: `ambiguous_set`, `empty_set`, `high_score`)
+        - `ml_prediction_set_size{model_version}` (Histogram — distribution of conformal set sizes `0`, `1`, `2`)
+        - `ml_uncertainty_score{model_version}` (Histogram — distribution of scalar uncertainty scores in `[0, 1]`)
+        - `ml_model_info{model_name, version, stage, alias}` (Gauge — active model metadata; cleared on reload)
       operationId: getPrometheusMetrics
       responses:
         "200":
@@ -387,17 +456,17 @@ paths:
               schema:
                 type: string
                 example: |
+                  # HELP ml_ready Whether the ML model is loaded and ready to serve predictions
+                  # TYPE ml_ready gauge
+                  ml_ready 1.0
                   # HELP ml_inference_duration_seconds Model inference latency in seconds
                   # TYPE ml_inference_duration_seconds histogram
                   ml_inference_duration_seconds_bucket{le="0.005",model_version="1"} 142.0
-                  ml_inference_duration_seconds_bucket{le="0.01",model_version="1"} 198.0
                   ml_inference_duration_seconds_bucket{le="0.3",model_version="1"} 200.0
                   ml_inference_duration_seconds_bucket{le="+Inf",model_version="1"} 200.0
-                  ml_inference_duration_seconds_count{model_version="1"} 200.0
-                  ml_inference_duration_seconds_sum{model_version="1"} 0.892
                   # HELP ml_human_review_requests_total Total predictions flagged for human review due to uncertainty
                   # TYPE ml_human_review_requests_total counter
-                  ml_human_review_requests_total{model_version="1",reason="conformal_ambiguous"} 6.0
+                  ml_human_review_requests_total{model_version="1",reason="ambiguous_set"} 6.0
 
 components:
   securitySchemes:
@@ -405,7 +474,7 @@ components:
       type: apiKey
       in: header
       name: X-Internal-Api-Key
-      description: Optional shared internal key when cluster-internal header validation is enabled.
+      description: Optional shared internal key when `INTERNAL_API_KEY` environment variable is set.
 
   schemas:
     TransactionType:
@@ -420,6 +489,14 @@ components:
         - CASH_IN
         - DEBIT
       example: TRANSFER
+
+    VizMethod:
+      type: string
+      enum:
+        - pca
+        - tsne
+        - umap
+      example: umap
 
     TransactionFeatures:
       type: object
@@ -513,6 +590,15 @@ components:
         - HUMAN_REVIEW
       example: HUMAN_REVIEW
 
+    UncertaintyMethod:
+      type: string
+      description: Uncertainty quantification algorithm used
+      enum:
+        - split_conformal
+        - mondrian_conformal
+        - ensemble_bootstrap
+      example: split_conformal
+
     UncertaintyEstimate:
       type: object
       required:
@@ -523,13 +609,7 @@ components:
       additionalProperties: false
       properties:
         method:
-          type: string
-          description: Uncertainty quantification algorithm used
-          enum:
-            - split_conformal
-            - mondrian_conformal
-            - ensemble_bootstrap
-          example: split_conformal
+          $ref: "#/components/schemas/UncertaintyMethod"
         confidence_level:
           type: number
           format: double
@@ -560,6 +640,22 @@ components:
           description: Normalized scalar uncertainty score in `[0, 1]` used for dashboards and alerts
           example: 0.08
 
+    ModelStage:
+      type: string
+      description: Model lifecycle stage required by `APPLICATION_CONCEPTION_PLAN V2.1` Section 17.2.
+      enum:
+        - Production
+        - Staging
+      example: Production
+
+    ModelAlias:
+      type: string
+      description: Modern MLflow 2.x model alias (`@production`, `@staging`).
+      enum:
+        - production
+        - staging
+      example: production
+
     ModelRef:
       type: object
       required:
@@ -577,25 +673,9 @@ components:
           description: Model version identifier
           example: "7"
         stage:
-          type: string
-          description: |
-            Model lifecycle stage required by `APPLICATION_CONCEPTION_PLAN V2.1` Section 17.2.
-            Explicitly includes `Fallback` so a local fallback model is never mistaken for `Production`.
-          enum:
-            - Production
-            - Staging
-            - Fallback
-          example: Production
+          $ref: "#/components/schemas/ModelStage"
         alias:
-          type: string
-          description: |
-            Modern MLflow 2.x model alias (`@production`, `@staging`, or `fallback`), provided alongside
-            `stage` for backward and forward compatibility.
-          enum:
-            - production
-            - staging
-            - fallback
-          example: production
+          $ref: "#/components/schemas/ModelAlias"
 
     FeatureExplanation:
       type: object
@@ -649,6 +729,7 @@ components:
           $ref: "#/components/schemas/ModelRef"
         explanations:
           type: array
+          nullable: true
           x-status: planned
           description: Optional top feature contributions (displayed to Fraud Analysts only; lower priority than core prediction fields)
           items:
@@ -676,6 +757,7 @@ components:
           example: ml-serving
         model_version:
           type: string
+          nullable: true
           example: "7"
 
     HealthReadyResponse:
@@ -689,13 +771,123 @@ components:
           type: string
           enum:
             - ready
-            - not_ready
           example: ready
         ready:
           type: boolean
           example: true
         model:
           $ref: "#/components/schemas/ModelRef"
+
+    ModelDetailMetadata:
+      type: object
+      required:
+        - name
+        - version
+        - stage
+        - alias
+        - algorithm
+      properties:
+        name:
+          type: string
+          example: fraud-detector
+        version:
+          type: string
+          example: "7"
+        stage:
+          $ref: "#/components/schemas/ModelStage"
+        alias:
+          $ref: "#/components/schemas/ModelAlias"
+        algorithm:
+          type: string
+          example: XGBClassifier
+        run_id:
+          type: string
+          nullable: true
+          example: "a83f1c92b04d4e119a7c2201948e7b11"
+        trained_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-11-15T14:30:00Z"
+
+    ConformalConfigMetadata:
+      type: object
+      required:
+        - method
+        - confidence_level
+        - target_review_rate
+      properties:
+        method:
+          $ref: "#/components/schemas/UncertaintyMethod"
+        confidence_level:
+          type: number
+          format: double
+          example: 0.95
+        target_review_rate:
+          type: number
+          format: double
+          description: Target upper bound for human review rate on in-scope traffic (`TRANSFER` + `CASH_OUT`)
+          example: 0.05
+        q_hat_fraud:
+          type: number
+          format: double
+          nullable: true
+          example: 0.58
+        q_hat_legit:
+          type: number
+          format: double
+          nullable: true
+          example: 0.92
+
+    MetricsSummaryMetadata:
+      type: object
+      description: Validation metrics recorded on the in-scope (`TRANSFER` + `CASH_OUT`) test split
+      properties:
+        roc_auc:
+          type: number
+          format: double
+          nullable: true
+          example: 0.9990
+        pr_auc:
+          type: number
+          format: double
+          nullable: true
+          example: 0.9976
+        f1:
+          type: number
+          format: double
+          nullable: true
+          example: 0.9960
+        precision:
+          type: number
+          format: double
+          nullable: true
+          example: 1.0000
+        recall:
+          type: number
+          format: double
+          nullable: true
+          example: 0.9921
+        mcc:
+          type: number
+          format: double
+          nullable: true
+          example: 0.9960
+        brier_score:
+          type: number
+          format: double
+          nullable: true
+          example: 0.000007
+        expected_review_rate:
+          type: number
+          format: double
+          nullable: true
+          example: 0.018
+        inference_p95_ms:
+          type: number
+          format: double
+          nullable: true
+          example: 4.2
 
     ModelInfoResponse:
       type: object
@@ -711,115 +903,11 @@ components:
           type: string
           example: "1.0"
         model:
-          type: object
-          required:
-            - name
-            - version
-            - stage
-            - alias
-            - algorithm
-          properties:
-            name:
-              type: string
-              example: fraud-detector
-            version:
-              type: string
-              example: "7"
-            stage:
-              type: string
-              enum:
-                - Production
-                - Staging
-                - Fallback
-              example: Production
-            alias:
-              type: string
-              enum:
-                - production
-                - staging
-                - fallback
-              example: production
-            algorithm:
-              type: string
-              example: XGBClassifier
-            run_id:
-              type: string
-              nullable: true
-              example: "a83f1c92b04d4e119a7c2201948e7b11"
-            trained_at:
-              type: string
-              format: date-time
-              nullable: true
-              example: "2026-11-15T14:30:00Z"
+          $ref: "#/components/schemas/ModelDetailMetadata"
         conformal_config:
-          type: object
-          required:
-            - method
-            - confidence_level
-            - target_review_rate
-          properties:
-            method:
-              type: string
-              example: split_conformal
-            confidence_level:
-              type: number
-              format: double
-              example: 0.95
-            target_review_rate:
-              type: number
-              format: double
-              description: Target upper bound for human review rate on in-scope traffic (`TRANSFER` + `CASH_OUT`)
-              example: 0.05
-            q_hat_fraud:
-              type: number
-              format: double
-              nullable: true
-              example: 0.58
-            q_hat_legit:
-              type: number
-              format: double
-              nullable: true
-              example: 0.92
+          $ref: "#/components/schemas/ConformalConfigMetadata"
         metrics_summary:
-          type: object
-          description: Validation metrics recorded on the in-scope (`TRANSFER` + `CASH_OUT`) test split
-          properties:
-            roc_auc:
-              type: number
-              format: double
-              example: 0.9990
-            pr_auc:
-              type: number
-              format: double
-              example: 0.9976
-            f1:
-              type: number
-              format: double
-              example: 0.9960
-            precision:
-              type: number
-              format: double
-              example: 1.0000
-            recall:
-              type: number
-              format: double
-              example: 0.9921
-            mcc:
-              type: number
-              format: double
-              example: 0.9960
-            brier_score:
-              type: number
-              format: double
-              example: 0.000007
-            expected_review_rate:
-              type: number
-              format: double
-              example: 0.018
-            inference_p95_ms:
-              type: number
-              format: double
-              example: 4.2
+          $ref: "#/components/schemas/MetricsSummaryMetadata"
         contract_features:
           type: array
           items:
@@ -887,6 +975,7 @@ components:
         balance_drain_ratio:
           type: number
           format: double
+          nullable: true
           example: 0.9999
 
     EmbeddingVizResponse:
@@ -901,12 +990,7 @@ components:
           type: string
           example: "1.0"
         method:
-          type: string
-          enum:
-            - pca
-            - tsne
-            - umap
-          example: umap
+          $ref: "#/components/schemas/VizMethod"
         n_points:
           type: integer
           maximum: 10000
@@ -915,6 +999,7 @@ components:
         generated_at:
           type: string
           format: date-time
+          nullable: true
           example: "2026-11-15T15:00:00Z"
         points:
           type: array
@@ -943,37 +1028,40 @@ components:
           type: string
           example: "greater_than_equal"
 
+    ErrorCode:
+      type: string
+      enum:
+        - VALIDATION_FAILED
+        - UNSUPPORTED_SCHEMA_VERSION
+        - MODEL_NOT_READY
+        - UNAUTHORIZED
+        - NOT_FOUND
+        - INTERNAL_ERROR
+
     ErrorResponse:
       type: object
       description: |
-        Unified FastAPI error contract returning `code`, `message`, `request_id`, `status`,
-        and FastAPI's native `detail` array.
+        Unified FastAPI error contract returned for all HTTP errors (401, 404, 422, 500, 503).
       required:
         - code
         - message
+        - request_id
         - status
         - detail
       properties:
         code:
-          type: string
-          enum:
-            - VALIDATION_FAILED
-            - MODEL_NOT_READY
-            - NOT_FOUND
-            - INTERNAL_ERROR
-          example: "VALIDATION_FAILED"
+          $ref: "#/components/schemas/ErrorCode"
         message:
           type: string
           example: "Request validation failed on 1 field(s)."
         request_id:
           type: string
           format: uuid
-          nullable: true
-          description: Echoed `request_id` (or `X-Correlation-Id`) when available
+          description: Echoed `request_id` from body, `X-Request-ID` header, or generated UUID
           example: "550e8400-e29b-41d4-a716-446655440000"
         status:
           type: integer
-          enum: [404, 422, 503, 500]
+          enum: [401, 404, 422, 500, 503]
           example: 422
         detail:
           type: array
