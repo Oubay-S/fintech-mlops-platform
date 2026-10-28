@@ -11,21 +11,27 @@ deterministic drain rule; the hard subset is the model test.
 |---|---:|---:|---:|---:|---:|
 | app_valid | 281,759 | 8,168 | 2.899% | 1.0000 | 0.9816 |
 
-## app_valid — mean ± std over folds/seeds
+## app_valid / contract — mean ± std over folds/seeds
 
 | Model | Runs | PR-AUC | ROC-AUC | Recall | Precision | F1 | Hard recall | Consistent hard recall | Train s | ms/row |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | lr | 15 | 0.9998 ± 0.0003 | 0.9999 ± 0.0001 | 0.9996 ± 0.0005 | 0.9993 ± 0.0009 | 0.9994 ± 0.0004 | 1.0000 ± 0.0002 | 1.0000 ± 0.0002 | 0.5521 ± 0.1609 | 0.0012 ± 0.0002 |
+| mlp | 15 | 0.9996 ± 0.0006 | 0.9996 ± 0.0005 | 0.9992 ± 0.0009 | 0.9999 ± 0.0002 | 0.9996 ± 0.0005 | 0.9996 ± 0.0006 | 0.9997 ± 0.0005 | 5.4270 ± 0.1027 | 0.0009 ± 0.0002 |
 | rf | 15 | 0.9998 ± 0.0003 | 0.9999 ± 0.0001 | 0.9996 ± 0.0005 | 1.0000 ± 0.0000 | 0.9998 ± 0.0002 | 1.0000 ± 0.0002 | 1.0000 ± 0.0000 | 7.3765 ± 0.4350 | 0.0052 ± 0.0002 |
+| svm | 15 | 0.9998 ± 0.0003 | 0.9999 ± 0.0001 | 0.9994 ± 0.0005 | 1.0000 ± 0.0002 | 0.9997 ± 0.0003 | 0.9998 ± 0.0004 | 0.9999 ± 0.0002 | 0.7095 ± 0.2098 | 0.0014 ± 0.0004 |
 | xgb | 15 | 0.9999 ± 0.0002 | 0.9999 ± 0.0002 | 0.9996 ± 0.0005 | 0.9998 ± 0.0004 | 0.9997 ± 0.0004 | 1.0000 ± 0.0000 | 1.0000 ± 0.0000 | 1.6999 ± 0.6001 | 0.0011 ± 0.0002 |
 
 ## Notes
 
 - `hard_recall` is measured on the rule-negative rows only; it is the number that matters.
+- **Ceiling effect:** the app-valid population is dominated by the drain rule; the fast models
+  are near-perfect and the differences are within noise. The all-serving/in-scope samples are
+  the sensitivity where model differences are more visible.
 - `consistent_hard_recall` recomputes `new = old ± amount` as the app does.
 - The app-valid population is a **biased proxy** for serving: `amount <= sender_old_balance`
   removes most legitimate PaySim rows because PaySim's balances are inconsistent.
   Report the all-serving/in-scope samples as a sensitivity; do not present the app-valid
   rate as a real-world prior.
 - The rule baseline is deterministic; its full-population precision/recall are above.
-- SVM uses `max_train_rows: 50000` (RBF); the test folds are not subsampled.
+- SVM is a linear SVM with sigmoid calibration, capped at 50k training rows;
+  test folds are not subsampled. RBF SVC on 50k × 15 fits is too slow for the benchmark.
