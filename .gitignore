@@ -63,6 +63,8 @@ Thumbs.db
 *.csv
 *.tsv
 *.parquet
+# Small, committed benchmark result tables (not datasets)
+!ml/training/results/*.csv
 data/
 !k8s/data/
 !k8s/data/.gitkeep

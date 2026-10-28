@@ -70,18 +70,20 @@ def build_target(df: pd.DataFrame) -> pd.Series:
     return df[TARGET].reset_index(drop=True)
 
 
-def build_preprocessor() -> ColumnTransformer:
+def build_preprocessor(numeric_features: list[str] | None = None) -> ColumnTransformer:
     """The single preprocessing object used by training and serving.
 
-    - numeric contract fields + derived features: StandardScaler
+    - numeric features: StandardScaler (default: all ``NUMERIC_FEATURES``)
     - ``type``: one-hot encoding
 
-    Scaling is harmless for tree models and required for LR/SVM/MLP, so one
-    transformation keeps the benchmark fair and the serving path identical.
+    ``numeric_features`` lets the benchmark build restricted/rule-blind
+    protocols without duplicating the transformation. The default is the full
+    contract model, so training and serving stay on one implementation.
     """
+    numeric = list(numeric_features) if numeric_features is not None else NUMERIC_FEATURES
     return ColumnTransformer(
         transformers=[
-            ("num", StandardScaler(), NUMERIC_FEATURES),
+            ("num", StandardScaler(), numeric),
             (
                 "cat",
                 OneHotEncoder(handle_unknown="ignore", sparse_output=False),

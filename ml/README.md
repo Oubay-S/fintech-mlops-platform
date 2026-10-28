@@ -48,6 +48,15 @@ python -m ml.training.scripts.prepare_data
 # baseline (full) + optional ablation preview
 python -m ml.training.scripts.run_baseline --ablation
 
+# build the cached benchmark populations (app-valid, in-scope, 1M samples)
+python -m ml.training.scripts.build_populations
+
+# Phase 4 benchmark — primary app-valid population
+python -m ml.training.scripts.run_benchmark --population app_valid --models lr,rf,xgb
+
+# smoke test on the 100k app-valid sample (2 folds, 1 seed)
+python -m ml.training.scripts.run_benchmark --population app_valid_sample_100k --models lr --quick
+
 # same on the 200k sample
 python -m ml.training.scripts.prepare_data --sample
 python -m ml.training.scripts.run_baseline --sample

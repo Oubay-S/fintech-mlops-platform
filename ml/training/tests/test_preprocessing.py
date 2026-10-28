@@ -67,6 +67,14 @@ def test_preprocessor_shape_and_names() -> None:
     assert "type_TRANSFER" in names
 
 
+def test_preprocessor_subset_shape() -> None:
+    _, _, _, fit_df, _ = _primary_splits()
+    features = build_features(fit_df)
+    preprocessor = build_preprocessor(["amount", "sender_old_balance"])
+    transformed = preprocessor.fit_transform(features)
+    assert transformed.shape[1] == 7  # 2 numeric + 5 type categories
+
+
 def test_preprocessor_is_deterministic() -> None:
     _, _, _, fit_df, _ = _primary_splits()
     features = build_features(fit_df)
