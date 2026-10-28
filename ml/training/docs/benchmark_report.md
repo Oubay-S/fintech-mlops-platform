@@ -21,6 +21,26 @@ deterministic drain rule; the hard subset is the model test.
 | svm | 15 | 0.9998 ± 0.0003 | 0.9999 ± 0.0001 | 0.9994 ± 0.0005 | 1.0000 ± 0.0002 | 0.9997 ± 0.0003 | 0.9998 ± 0.0004 | 0.9999 ± 0.0002 | 0.7095 ± 0.2098 | 0.0014 ± 0.0004 |
 | xgb | 15 | 0.9999 ± 0.0002 | 0.9999 ± 0.0002 | 0.9996 ± 0.0005 | 0.9998 ± 0.0004 | 0.9997 ± 0.0004 | 1.0000 ± 0.0000 | 1.0000 ± 0.0000 | 1.6999 ± 0.6001 | 0.0011 ± 0.0002 |
 
+## app_valid / restricted — mean ± std over folds/seeds
+
+| Model | Runs | PR-AUC | ROC-AUC | Recall | Precision | F1 | Hard recall | Consistent hard recall | Train s | ms/row |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| lr | 15 | 0.6584 ± 0.0088 | 0.9348 ± 0.0030 | 0.8127 ± 0.0067 | 0.2121 ± 0.0033 | 0.3363 ± 0.0043 | 0.8101 ± 0.0065 | 0.8101 ± 0.0065 | 0.5833 ± 0.1703 | 0.0008 ± 0.0003 |
+| mlp | 15 | 0.9604 ± 0.0105 | 0.9979 ± 0.0009 | 0.8470 ± 0.0339 | 0.9379 ± 0.0153 | 0.8896 ± 0.0158 | 0.8446 ± 0.0345 | 0.8446 ± 0.0345 | 18.5290 ± 3.8407 | 0.0008 ± 0.0001 |
+| rf | 15 | 0.9407 ± 0.0039 | 0.9947 ± 0.0009 | 0.8272 ± 0.0097 | 0.9139 ± 0.0059 | 0.8683 ± 0.0063 | 0.8243 ± 0.0097 | 0.8243 ± 0.0097 | 10.4152 ± 0.1785 | 0.0053 ± 0.0003 |
+| svm | 15 | 0.6575 ± 0.0126 | 0.9330 ± 0.0066 | 0.4678 ± 0.0130 | 0.8749 ± 0.0117 | 0.6095 ± 0.0109 | 0.4584 ± 0.0132 | 0.4584 ± 0.0132 | 0.5062 ± 0.0966 | 0.0013 ± 0.0004 |
+| xgb | 15 | 0.9427 ± 0.0036 | 0.9976 ± 0.0003 | 0.9782 ± 0.0048 | 0.6134 ± 0.0119 | 0.7539 ± 0.0095 | 0.9782 ± 0.0050 | 0.9782 ± 0.0050 | 1.6996 ± 0.7222 | 0.0013 ± 0.0002 |
+
+## app_valid / rule_blind — mean ± std over folds/seeds
+
+| Model | Runs | PR-AUC | ROC-AUC | Recall | Precision | F1 | Hard recall | Consistent hard recall | Train s | ms/row |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| lr | 15 | 0.6360 ± 0.0082 | 0.8988 ± 0.0044 | 0.7833 ± 0.0084 | 0.1872 ± 0.0035 | 0.3022 ± 0.0048 | 0.7794 ± 0.0082 | 0.7799 ± 0.0088 | 0.7992 ± 0.1836 | 0.0008 ± 0.0003 |
+| mlp | 15 | 0.7799 ± 0.0084 | 0.9201 ± 0.0040 | 0.6916 ± 0.0106 | 0.9795 ± 0.0054 | 0.8107 ± 0.0070 | 0.6861 ± 0.0108 | 0.2930 ± 0.0105 | 12.9905 ± 3.1357 | 0.0007 ± 0.0000 |
+| rf | 15 | 0.7701 ± 0.0081 | 0.8861 ± 0.0051 | 0.7289 ± 0.0081 | 0.8165 ± 0.0093 | 0.7701 ± 0.0054 | 0.7240 ± 0.0078 | 0.2345 ± 0.0069 | 13.6661 ± 0.3567 | 0.0040 ± 0.0004 |
+| svm | 15 | 0.6286 ± 0.0082 | 0.8982 ± 0.0044 | 0.4460 ± 0.0104 | 0.8920 ± 0.0097 | 0.5946 ± 0.0089 | 0.4358 ± 0.0107 | 0.4054 ± 0.0130 | 0.6677 ± 0.1842 | 0.0012 ± 0.0004 |
+| xgb | 15 | 0.7912 ± 0.0078 | 0.9195 ± 0.0042 | 0.7805 ± 0.0082 | 0.4564 ± 0.0153 | 0.5758 ± 0.0123 | 0.7766 ± 0.0080 | 0.2915 ± 0.0113 | 2.6445 ± 0.7808 | 0.0014 ± 0.0002 |
+
 ## Notes
 
 - `hard_recall` is measured on the rule-negative rows only; it is the number that matters.
@@ -28,6 +48,10 @@ deterministic drain rule; the hard subset is the model test.
   are near-perfect and the differences are within noise. The all-serving/in-scope samples are
   the sensitivity where model differences are more visible.
 - `consistent_hard_recall` recomputes `new = old ± amount` as the app does.
+- **Serving-consistent shift:** in the rule-blind protocol, models that use `receiver_new_balance`
+  (RF/XGB/MLP) drop from ~0.69–0.78 raw hard recall to ~0.23–0.29 on the app-consistent view;
+  LR/SVM (no new balances) are invariant. The app computes the new balances, so the consistent
+  number is the serving estimate.
 - The app-valid population is a **biased proxy** for serving: `amount <= sender_old_balance`
   removes most legitimate PaySim rows because PaySim's balances are inconsistent.
   Report the all-serving/in-scope samples as a sensitivity; do not present the app-valid
