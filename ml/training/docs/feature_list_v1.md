@@ -1,8 +1,8 @@
-# Feature List v1.1 — `/predict` Contract (PaySim / Wallet-Transfer Domain)
+# Feature List v1.2 — `/predict` Contract (PaySim / Wallet-Transfer Domain)
 
-**Owner:** ML Training role · **Status:** Frozen v1.1 for consumers (Risk service, ML Serving) · **Date:** 27 October 2026
-**Companion:** `APPLICATION_CONCEPTION_PLAN V2.1.md` (latest, `origin/main`), §11.6, §11.7, §17.1, §24.2.
-**Supersedes:** v1.0 (21 October 2026). Changes: call timing aligned with §11.6 (no preview/binding/fingerprint); amount representation clarified; in-scope evaluation and hard-subset evidence added.
+**Owner:** ML Training role · **Status:** Frozen v1.2 for consumers (Risk service, ML Serving) · **Date:** 29 October 2026
+**Companion:** `APPLICATION_CONCEPTION_PLAN V2.2.md` (latest, 28 October 2026), §11.2, §11.6, §11.7, §17.1, §24.2.
+**Supersedes:** v1.1 (27 October 2026). Changes: aligned with V2.2 — initial balance 1,000,000 / max transfer 10,000,000 / provisional R5 500,000; `CASH_OUT` core; all five `type` values accepted by ML Serving; serving-consistent balance check.
 **Repo copy:** committed copy of the frozen contract; the working copy and the Role 4 conception audit live at the project root.
 
 ---
@@ -23,7 +23,7 @@ PaySim measured facts that shape this contract (see `DATASET_PROFILE.md`):
 
 | API field | Type | Definition | Dataset source | Application source | Required |
 |---|---|---|---|---|---|
-| `type` | enum: `TRANSFER`, `CASH_OUT`, `CASH_IN`, `PAYMENT`, `DEBIT` | Transaction type. The app creates `TRANSFER` for P2P transfers and payment requests, and `CASH_OUT` only if the cash-agent withdrawal is enabled (`Should`). `CASH_IN`, `PAYMENT`, `DEBIT` are not offered by the app. The API may accept all five for forward compatibility; the model is evaluated on the in-scope set. | `type` | transfer type | **M** |
+| `type` | enum: `TRANSFER`, `CASH_OUT`, `CASH_IN`, `PAYMENT`, `DEBIT` | Transaction type. V2.2 makes `CASH_OUT` **core** (withdraw cash to a cash agent); the app creates `TRANSFER` and `CASH_OUT`. `CASH_IN`, `PAYMENT`, `DEBIT` are not offered. ML Serving **accepts all five** (confirmed in V2.2 §17.1); the model is evaluated on the in-scope `TRANSFER` + `CASH_OUT` set. | `type` | transfer type | **M** |
 | `amount` | decimal | Transfer amount | `amount` | `transfers.amount` | **M** |
 | `sender_old_balance` | decimal | Sender wallet balance before the transfer | `oldbalanceOrg` | sender wallet balance | **M** |
 | `sender_new_balance` | decimal | Sender wallet balance after the transfer (computed by the app before execution) | `newbalanceOrig` | sender balance − amount | **M** |
@@ -105,7 +105,7 @@ The measured rule is a property of the simulator, not of a good model:
 3. **In-scope evaluation** — primary metrics on `TRANSFER` + `CASH_OUT` (the traffic the app serves); all-five-types results are secondary. If `CASH_OUT` is not implemented, use `TRANSFER` only.
 4. `isFlaggedFraud` is never used.
 5. The report states clearly: *the near-perfect scores reflect the simulator's structure (single injected fraud pattern), not real-world fraud-detection capability*.
-6. **Full-drain product note:** the contract model gives p ≈ 0.99999 to any full-balance transfer. The app allows full-balance transfers and R3 rejects `{fraud}`, so a legitimate full drain is auto-rejected. The product must either restrict full-balance transfers, route full drains to review, serve the restricted model, or document the limitation (Role 4 conception audit, B-03).
+6. **Full-drain product note:** the contract model gives p ≈ 0.99999 to any full-balance transfer. V2.2's test strategy uses "whole balance to a new receiver" as the `REJECTED` demo case, and R3 rejects `{fraud}`, so a legitimate full drain is auto-rejected. The product must either restrict full-balance transfers, route full drains to review, serve the restricted model, or document the limitation (Role 4 conception audit, B-03; V2.2 does not resolve the legitimate-user case).
 
 ---
 
@@ -138,12 +138,14 @@ There is no chargeback event in the wallet application (PaySim has no such conce
 
 ## 9. Evaluation protocol (summary; details in `ML_TRAINING_PLAN.md`)
 
-- **Primary metrics on the in-scope, app-valid subset**: `TRANSFER` + `CASH_OUT`, `amount > 0`, `amount <= sender_old_balance` (the app rejects the rest before ML). If `CASH_OUT` is not implemented, use `TRANSFER` only.
+- **Scale (V2.2):** initial balance **1,000,000.00**, `app.transfer.max-amount` **10,000,000.00**; raw PaySim magnitudes, **no rescale**. App-valid p99 is 968,420.
+- **Primary metrics on the in-scope, app-valid subset**: `TRANSFER` + `CASH_OUT` (both core in V2.2), `amount > 0`, `amount <= sender_old_balance`. The app rejects the rest before ML.
 - **The app-valid population is not the full PaySim population.** `available >= amount` removes ~90% of PaySim rows before ML; the app-valid test set is 56,349 rows with 1,636 frauds (**2.903%**), not 0.297%. Calibration and the review-rate target must use this prevalence.
 - **Time-based holdout + destination-disjoint holdout.** Sender-disjoint is trivial on PaySim (99.85% of senders appear once); destination-disjoint is the meaningful generalization check.
-- **Class-conditional (Mondrian) conformal** on the app-valid set; choose the confidence level jointly with the R5 threshold to keep the review rate ≤5%. Current evidence on the app-valid test set: 99% + R5 p95 (**324,610** original / ≈**325** rescaled) → **4.29% review**, all 1,636 frauds caught (R3 1,629 + R4 7), 0 legitimate in R3; 95% → 7.68%; 99.9% → 3.38%.
+- **Class-conditional (Mondrian) conformal** on the app-valid set at **99%**. R5 is **provisional 500,000** (V2.2) and must be validated: at 99% + 500,000, the app-valid test gives **MODEL_UNCERTAIN ≈1.11% + AMOUNT_HIGH ≈1.94% → ~3.05% review**, all 1,636 frauds caught. The 5%-budget alternative is **324,610** (→ 4.29%); 95% at 500,000 is ~6.7%, above target. Report the two review reasons separately.
 - **Report the rule baseline and the rule-negative hard subset** for every model, plus the serving-consistent variant. On the app-valid set the rule baseline is precision 1.000, recall 0.9829; the hard subset is 28 frauds, with recall 0.679 (raw) / 0.321 (serving-consistent). The headline ROC-AUC is a dataset property, not a model achievement.
-- **Full-drain policy:** decide how the app handles a legitimate full-balance transfer before the demo (route to review, restrict, or document).
+- **Type:** ML Serving accepts all five values (V2.2 confirmed); the app sends `TRANSFER` + `CASH_OUT`; the model is evaluated on the two-type in-scope set.
+- **Full-drain policy:** V2.2's test strategy uses a whole-balance transfer as the `REJECTED` case; the legitimate full-drain UX is still open. Decide before the demo (route to review, restrict, or document).
 
 ---
 
