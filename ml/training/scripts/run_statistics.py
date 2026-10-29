@@ -33,6 +33,7 @@ METRIC_LABELS = {
     "f1": "F1",
     "recall": "Recall",
     "hard_recall": "Hard-subset recall",
+    "consistent_hard_recall": "Serving-consistent hard-subset recall",
 }
 
 
@@ -184,7 +185,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results", default=str(DEFAULT_RESULTS))
     parser.add_argument("--report", default=str(DEFAULT_REPORT))
-    parser.add_argument("--metrics", default="pr_auc,hard_recall,f1")
+    parser.add_argument("--metrics", default="pr_auc,hard_recall,consistent_hard_recall,f1")
     args = parser.parse_args()
 
     results = pd.read_csv(resolve(args.results))

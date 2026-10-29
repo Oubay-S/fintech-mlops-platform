@@ -171,8 +171,11 @@ def run_fold(
     }
 
     # Rule-negative hard subset (the frauds the deterministic rule misses).
-    hard_mask = (test_df["amount"] == test_df["oldbalanceOrg"]).to_numpy()
+    # The rule-positive rows are recorded separately; they are almost all fraud.
+    rule_mask = (test_df["amount"] == test_df["oldbalanceOrg"]).to_numpy()
+    hard_mask = ~rule_mask
     hard = metrics_at(y_test[hard_mask], probs[hard_mask])
+    rule_positive = metrics_at(y_test[rule_mask], probs[rule_mask])
     row.update(
         {
             "hard_rows": int(hard_mask.sum()),
@@ -181,6 +184,9 @@ def run_fold(
             "hard_precision": hard["precision"],
             "hard_f1": hard["f1"],
             "hard_roc_auc": hard["roc_auc"],
+            "rule_positive_rows": int(rule_mask.sum()),
+            "rule_positive_frauds": int(y_test[rule_mask].sum()),
+            "rule_positive_recall": rule_positive["recall"],
         }
     )
 
@@ -290,10 +296,14 @@ def write_report(
         "  are near-perfect and the differences are within noise. The all-serving/in-scope samples are",
         "  the sensitivity where model differences are more visible.",
         "- `consistent_hard_recall` recomputes `new = old ± amount` as the app does.",
-        "- **Serving-consistent shift:** in the rule-blind protocol, models that use `receiver_new_balance`",
-        "  (RF/XGB/MLP) drop from ~0.69–0.78 raw hard recall to ~0.23–0.29 on the app-consistent view;",
-        "  LR/SVM (no new balances) are invariant. The app computes the new balances, so the consistent",
-        "  number is the serving estimate.",
+        "- **Serving-consistent shift (rule-blind):** RF hard recall drops from 0.988 to **0.000** and",
+        "  XGB from 0.988 to **0.126** on the app-consistent view; MLP stays 0.982, LR/SVM ~0.99.",
+        "  The app computes the new balances, so the consistent column is the serving estimate. The",
+        "  served contract XGB stays **0.982**.",
+        "- **Hard-subset scale:** the app-valid hard subset is ~31 frauds per CV test fold (28 in the",
+        "  baseline test) and is near-saturated in the raw view (0.94–0.99). The full-serving hard",
+        "  subset (32 frauds; baseline LR 0.594 raw / 0.281 consistent) is the harder view; do not",
+        "  compare the two directly.",
         "- The app-valid population is a **biased proxy** for serving: `amount <= sender_old_balance`",
         "  removes most legitimate PaySim rows because PaySim's balances are inconsistent.",
         "  Report the all-serving/in-scope samples as a sensitivity; do not present the app-valid",

@@ -74,7 +74,7 @@ The frozen `/predict` feature contract is `ml/training/docs/feature_list_v1.md` 
 - Implementation: `ml/common/artifact_contract.py` — `UncertaintyConfig`, `prediction_set`, `suggested_action`, `log_pipeline`.
 - The registered `sklearn.pipeline.Pipeline` starts at `build_preprocessor()` and expects the **10-column** frame. Serving must call `ml.common.preprocessing.build_serving_features(raw_six_fields)` first; `build_features()` is the PaySim-column training counterpart and would fail on a contract-named payload.
 - The companion `uncertainty_config.json` carries `confidence_level`, `q_hat_fraud`, `q_hat_legit`, `target_review_rate`, the feature lists, the metrics summary, and `eval_population`.
-- Example: `ml/training/docs/uncertainty_config.example.json` (illustrative values; regenerate from the final model in Phase 6).
+- Example: `ml/training/docs/uncertainty_config.example.json` mirrors the final contract; the final values are in `ml/training/docs/uncertainty_config.json` (Phase 6).
 - The written contract is `mlflow-artifact-contract.md` at the project root (serving-authored).
 
 ## Evaluation protocols
