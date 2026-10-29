@@ -57,6 +57,12 @@ python -m ml.training.scripts.run_benchmark --population app_valid --models lr,r
 # smoke test on the 100k app-valid sample (2 folds, 1 seed)
 python -m ml.training.scripts.run_benchmark --population app_valid_sample_100k --models lr --quick
 
+# temporal + destination-disjoint robustness
+python -m ml.training.scripts.run_robustness
+
+# Mondrian conformal + R1–R6 decision mix
+python -m ml.training.scripts.run_conformal --model xgb --confidence 0.99 --r5 500000 --r5-alt 324610
+
 # same on the 200k sample
 python -m ml.training.scripts.prepare_data --sample
 python -m ml.training.scripts.run_baseline --sample

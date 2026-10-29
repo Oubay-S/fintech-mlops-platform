@@ -2,7 +2,7 @@
 
 **Owner:** ML Training role · **Status:** Frozen v1.2 for consumers (Risk service, ML Serving) · **Date:** 29 October 2026
 **Companion:** `APPLICATION_CONCEPTION_PLAN V2.2.md` (latest, 28 October 2026), §11.2, §11.6, §11.7, §17.1, §24.2.
-**Supersedes:** v1.1 (27 October 2026). Changes: aligned with V2.2 — initial balance 1,000,000 / max transfer 10,000,000 / provisional R5 500,000; `CASH_OUT` core; all five `type` values accepted by ML Serving; serving-consistent balance check.
+**Supersedes:** v1.1 (27 October 2026). Changes: aligned with V2.2 — initial balance 1,000,000 / max transfer 10,000,000 / provisional R5 500,000; `CASH_OUT` core; all five `type` values accepted by ML Serving; serving-consistent balance check; temporal/destination robustness.
 **Repo copy:** committed copy of the frozen contract; the working copy and the Role 4 conception audit live at the project root.
 
 ---
@@ -141,8 +141,8 @@ There is no chargeback event in the wallet application (PaySim has no such conce
 - **Scale (V2.2):** initial balance **1,000,000.00**, `app.transfer.max-amount` **10,000,000.00**; raw PaySim magnitudes, **no rescale**. App-valid p99 is 968,420.
 - **Primary metrics on the in-scope, app-valid subset**: `TRANSFER` + `CASH_OUT` (both core in V2.2), `amount > 0`, `amount <= sender_old_balance`. The app rejects the rest before ML.
 - **The app-valid population is not the full PaySim population.** `available >= amount` removes ~90% of PaySim rows before ML; the app-valid test set is 56,349 rows with 1,636 frauds (**2.903%**), not 0.297%. Calibration and the review-rate target must use this prevalence.
-- **Time-based holdout + destination-disjoint holdout.** Sender-disjoint is trivial on PaySim (99.85% of senders appear once); destination-disjoint is the meaningful generalization check.
-- **Class-conditional (Mondrian) conformal** on the app-valid set at **99%**. R5 is **provisional 500,000** (V2.2) and must be validated: at 99% + 500,000, the app-valid test gives **MODEL_UNCERTAIN ≈1.11% + AMOUNT_HIGH ≈1.94% → ~3.05% review**, all 1,636 frauds caught. The 5%-budget alternative is **324,610** (→ 4.29%); 95% at 500,000 is ~6.7%, above target. Report the two review reasons separately.
+- **Time-based holdout + destination-disjoint holdout.** Sender-disjoint is trivial on PaySim (99.85% of senders appear once); destination-disjoint is the meaningful generalization check. Implemented: temporal fraud 1.753% → 7.361%, review 1.093%, all 4,237 frauds caught; destination 0 overlap / 40,353 unseen receivers, review 1.329%, all 1,608 caught (`robustness_report.md`).
+- **Class-conditional (Mondrian) conformal** on the app-valid set at **99%**. R5 is **provisional 500,000** (V2.2) and has been validated on XGBoost: at 99% + 500,000, **MODEL_UNCERTAIN 0.903% + AMOUNT_HIGH 0.451% → 1.354% review**, all 1,634 test frauds caught (0 missed), 0 legitimate rejected. The 5%-budget alternative **324,610** gives **3.906%** (0.903% + 3.003%), same frauds. Both are ≤5%; 500,000 is conservative, 324,610 uses more of the budget. Coverage: legit 99.10%, fraud 98.96%; the 17 uncovered frauds are R4 review (no auto-approval).
 - **Report the rule baseline and the rule-negative hard subset** for every model, plus the serving-consistent variant. On the app-valid set the rule baseline is precision 1.000, recall 0.9829; the hard subset is 28 frauds, with recall 0.679 (raw) / 0.321 (serving-consistent). The headline ROC-AUC is a dataset property, not a model achievement.
 - **Type:** ML Serving accepts all five values (V2.2 confirmed); the app sends `TRANSFER` + `CASH_OUT`; the model is evaluated on the two-type in-scope set.
 - **Full-drain policy:** V2.2's test strategy uses a whole-balance transfer as the `REJECTED` case; the legitimate full-drain UX is still open. Decide before the demo (route to review, restrict, or document).
