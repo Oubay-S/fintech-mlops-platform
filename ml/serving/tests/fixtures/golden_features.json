@@ -22,10 +22,7 @@
     "receiver_gain_ratio",
     "sender_zero_after",
     "amount_equals_old_balance",
-    "type_CASH_IN",
     "type_CASH_OUT",
-    "type_DEBIT",
-    "type_PAYMENT",
     "type_TRANSFER"
   ],
   "cases": [
@@ -174,35 +171,35 @@
       }
     },
     {
-      "name": "payment_transaction",
+      "name": "cash_out_small_legitimate",
       "raw_paysim": {
         "step": 5,
-        "type": "PAYMENT",
+        "type": "CASH_OUT",
         "amount": 320.0,
         "nameOrig": "C1000005",
         "oldbalanceOrg": 1500.0,
         "newbalanceOrig": 1180.0,
-        "nameDest": "M2000005",
+        "nameDest": "C2000005",
         "oldbalanceDest": 0.0,
-        "newbalanceDest": 0.0,
+        "newbalanceDest": 320.0,
         "isFraud": 0,
         "isFlaggedFraud": 0
       },
       "contract_input": {
-        "type": "PAYMENT",
+        "type": "CASH_OUT",
         "amount": 320.0,
         "sender_old_balance": 1500.0,
         "sender_new_balance": 1180.0,
         "receiver_old_balance": 0.0,
-        "receiver_new_balance": 0.0
+        "receiver_new_balance": 320.0
       },
       "expected_engineered": {
-        "type": "PAYMENT",
+        "type": "CASH_OUT",
         "amount": 320.0,
         "sender_old_balance": 1500.0,
         "sender_new_balance": 1180.0,
         "receiver_old_balance": 0.0,
-        "receiver_new_balance": 0.0,
+        "receiver_new_balance": 320.0,
         "balance_drain_ratio": 0.21319120586275817,
         "receiver_gain_ratio": 320.0,
         "sender_zero_after": 0,

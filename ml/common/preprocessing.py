@@ -55,6 +55,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     return add_derived_features(to_contract_frame(df))
 
 
+# Alias for backward/forward compatibility with Role 4 training scripts
+build_serving_features = build_features
+
+
 def build_target(df: pd.DataFrame) -> pd.Series:
     """Return the target aligned with ``build_features`` output."""
     if TARGET not in df.columns:
@@ -65,11 +69,11 @@ def build_target(df: pd.DataFrame) -> pd.Series:
 def build_preprocessor() -> ColumnTransformer:
     """The single preprocessing object used by training and serving.
 
-    - numeric contract fields + derived features: StandardScaler
-    - ``type``: one-hot encoding with explicit 5 PaySim categories
+    - numeric contract fields + derived features: StandardScaler (9 features)
+    - ``type``: one-hot encoding with the 2 in-scope PaySim categories (`CASH_OUT`, `TRANSFER`)
 
     Scaling is harmless for tree models and required for LR/SVM/MLP, so one
-    transformation keeps the benchmark fair and the serving path identical.
+    transformation keeps the benchmark fair and the serving path identical (11 features total).
     """
     return ColumnTransformer(
         transformers=[

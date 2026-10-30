@@ -23,9 +23,9 @@ def build_trained_sklearn_pipeline() -> tuple[Pipeline, UncertaintyConfigContrac
     ML inference and split-conformal pipeline without heuristic shortcuts.
     """
     rows = [
-        # Legitimate low-drain payments/transfers
+        # Legitimate low-drain transfers and cash-outs
         {
-            "type": "PAYMENT",
+            "type": "TRANSFER",
             "amount": 120.0,
             "sender_old_balance": 5000.0,
             "sender_new_balance": 4880.0,
@@ -33,15 +33,15 @@ def build_trained_sklearn_pipeline() -> tuple[Pipeline, UncertaintyConfigContrac
             "receiver_new_balance": 320.0,
         },
         {
-            "type": "CASH_IN",
+            "type": "CASH_OUT",
             "amount": 500.0,
-            "sender_old_balance": 1000.0,
-            "sender_new_balance": 1500.0,
+            "sender_old_balance": 10000.0,
+            "sender_new_balance": 9500.0,
             "receiver_old_balance": 3000.0,
-            "receiver_new_balance": 2500.0,
+            "receiver_new_balance": 3500.0,
         },
         {
-            "type": "DEBIT",
+            "type": "TRANSFER",
             "amount": 45.0,
             "sender_old_balance": 900.0,
             "sender_new_balance": 855.0,
@@ -49,12 +49,12 @@ def build_trained_sklearn_pipeline() -> tuple[Pipeline, UncertaintyConfigContrac
             "receiver_new_balance": 145.0,
         },
         {
-            "type": "PAYMENT",
+            "type": "CASH_OUT",
             "amount": 80.0,
             "sender_old_balance": 2500.0,
             "sender_new_balance": 2420.0,
-            "receiver_old_balance": 0.0,
-            "receiver_new_balance": 80.0,
+            "receiver_old_balance": 100.0,
+            "receiver_new_balance": 180.0,
         },
         # Fraudulent full-drain transfers/cash-outs
         {

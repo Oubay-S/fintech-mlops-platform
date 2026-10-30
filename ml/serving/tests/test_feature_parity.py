@@ -3,7 +3,7 @@
 Verifies:
 1. `ml.common.preprocessing.build_features` and `TrainedModelPredictor.features_to_dataframe`
    produce identical 10-column feature vectors matching `fixtures/golden_features.json`.
-2. `build_preprocessor()` outputs the exact 14-column transformed signature
+2. `build_preprocessor()` outputs the exact 11-column transformed signature
    (`EXPECTED_TRANSFORMED_FEATURES`).
 3. A mismatch in feature order or column names raises `ValueError` during model initialization.
 """
@@ -73,7 +73,7 @@ def test_preprocessor_transformed_signature_matches_contract() -> None:
     transformed = preprocessor.fit_transform(features_df)
     names_out = list(preprocessor.get_feature_names_out())
 
-    assert transformed.shape == (len(rows), 14)
+    assert transformed.shape == (len(rows), 11)
     assert names_out == list(EXPECTED_TRANSFORMED_FEATURES)
 
 

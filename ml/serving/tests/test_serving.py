@@ -131,7 +131,7 @@ def test_predict_confident_legit_allow(
             "schema_version": "1.0",
             "request_id": req_id,
             "features": {
-                "type": "PAYMENT",
+                "type": "TRANSFER",
                 "amount": 120.0,
                 "sender_old_balance": 5000.0,
                 "sender_new_balance": 4880.0,
@@ -338,13 +338,13 @@ def test_internal_api_key_security_and_probe_exemptions(
             },
             "VALIDATION_FAILED",
         ),
-        # Invalid transaction type enum
+        # Invalid transaction type enum (including out-of-scope PaySim type PAYMENT)
         (
             {
                 "schema_version": "1.0",
                 "request_id": "550e8400-e29b-41d4-a716-446655440000",
                 "features": {
-                    "type": "WIRE_TRANSFER",
+                    "type": "PAYMENT",
                     "amount": 100.0,
                     "sender_old_balance": 100.0,
                     "sender_new_balance": 0.0,

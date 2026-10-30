@@ -11,7 +11,7 @@
 We use **Format B (`sklearn.pipeline.Pipeline` + `uncertainty_config.json`)** as the canonical MLflow Registry contract:
 
 1. **`model/` (MLflow `sklearn` flavor):**
-   - A fitted `sklearn.pipeline.Pipeline` whose first step is `ml.common.preprocessing.build_preprocessor()` (`ColumnTransformer` over the 10 columns produced by `build_features()`) and whose final step is the calibrated classifier exposing `.predict_proba(X)`.
+   - A fitted `sklearn.pipeline.Pipeline` whose first step is `ml.common.preprocessing.build_preprocessor()` (`ColumnTransformer` over the 10 columns produced by `build_features()`, outputting the 11 transformed features: 9 numeric + `type_CASH_OUT` + `type_TRANSFER`) and whose final step is the calibrated classifier exposing `.predict_proba(X)`.
    - Logged via:
      ```python
      mlflow.sklearn.log_model(

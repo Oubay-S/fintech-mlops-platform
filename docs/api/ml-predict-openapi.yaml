@@ -480,14 +480,12 @@ components:
     TransactionType:
       type: string
       description: |
-        PaySim transaction type. ML Training fits the one-hot encoder on all 5 PaySim types;
-        in production, the Spring Boot application only sends `TRANSFER` and `CASH_OUT` (Rule R1b).
+        In-scope PaySim transaction type supported by the application and ML model (`TRANSFER` and `CASH_OUT`).
+        In PaySim, 100% of fraudulent transactions occur in `TRANSFER` and `CASH_OUT`, and the Spring Boot
+        application only creates and scores these two transaction types (Rule R1b).
       enum:
         - TRANSFER
         - CASH_OUT
-        - PAYMENT
-        - CASH_IN
-        - DEBIT
       example: TRANSFER
 
     VizMethod:

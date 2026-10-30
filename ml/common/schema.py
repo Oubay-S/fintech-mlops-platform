@@ -58,9 +58,9 @@ NUMERIC_FEATURES = [
 ] + DERIVED_FEATURES
 CATEGORICAL_FEATURES = ["type"]
 
-# Canonical order of categories for OneHotEncoder so feature names are deterministic
-# even when fitted on a subset of transaction types.
-TRANSACTION_TYPES = ["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"]
+# Canonical order of in-scope PaySim categories for OneHotEncoder (`CASH_OUT`, `TRANSFER`)
+# matching the application scope (Rule R1b) and the trained model's 11-column signature.
+TRANSACTION_TYPES = ["CASH_OUT", "TRANSFER"]
 
 # Columns that must never enter the feature matrix (leakage / identifiers / non-contract).
 FORBIDDEN_FEATURES = ["isFlaggedFraud", "step", "nameOrig", "nameDest"]
