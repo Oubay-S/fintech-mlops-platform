@@ -4,7 +4,7 @@
 
 **Document purpose.** This document defines the technical conception of the **application layer** of the High-Availability MLOps FinTech Platform: architecture, data design, API contracts, security, and system behaviour. It is the shared reference for all team members and should be read before writing code. DevOps/MLOps, ML Training and ML Serving appear only through **interface contracts** (section 24).
 
-**Version:** 2.1, 20 October 2026.
+**Version:** 2.2, 28 October 2026.
 **Dataset:** the primary dataset is **PaySim** (confirmed). Feature names in section 17 depend on it.
 
 ---
@@ -130,7 +130,7 @@ Real payment processing, double-entry accounting, multi-currency, KYC document u
 Self-registered. Has a profile and a wallet. Can:
 - Register, log in, log out, manage profile
 - Look up a receiver by email, username or phone
-- Send transfers, create payment requests, and withdraw cash to a cash agent (Should)
+- Send transfers, create payment requests, and withdraw cash to a cash agent
 - Open, accept or decline incoming payment requests; cancel outgoing ones
 - View wallet balance, ledger, transfer history
 - Receive in-app and email notifications
@@ -166,7 +166,7 @@ Created by another admin (the first admin is seeded). **Has no wallet.** Can:
 | Own profile read and update | ✔ | ✔ | ✔ | |
 | Receiver lookup | ✔ | | | |
 | Create transfer / payment request | ✔ | | | |
-| Withdraw cash (`CASH_OUT`, Should) | ✔ | | | |
+| Withdraw cash (`CASH_OUT`) | ✔ | | | |
 | Accept / decline / cancel requests (own) | ✔ | | | |
 | View own wallet, ledger, transfers | ✔ | | | |
 | View own notifications | ✔ | ✔ | ✔ | |
@@ -254,7 +254,7 @@ flowchart LR
       UC10["Receive Request Pop-up"]
       UC11["Accept / Decline Request"]
       UC12["View Wallet and History"]
-      UC24["Withdraw Cash (Should)"]
+      UC24["Withdraw Cash"]
     end
     subgraph RiskG["RISK AND REVIEW"]
       UC13["Score Transaction"]
@@ -313,7 +313,7 @@ Priority: **M** = Must, **S** = Should, **C** = Could.
 | 8 | Receiver lookup | Customer | Resolve email/username/phone to receiver ID and masked name, rate-limited | M |
 | 9 | Account status | Customer | Block/unblock, replicate status to other services | M |
 | 10 | Wallet and ledger | Transaction | Balances, holds, append-only ledger, invariants | M |
-| 11 | Transfer processing | Transaction | Validate, hold, score, execute or release (`TRANSFER`; `CASH_OUT` as Should) | M |
+| 11 | Transfer processing | Transaction | Validate, hold, score, execute or release (`TRANSFER` and `CASH_OUT`) | M |
 | 12 | Payment request management | Transaction | Create, accept, decline, cancel, expire (2-minute live request) | M |
 | 13 | Idempotency | Transaction | Safe retries for all money-moving requests | M |
 | 14 | Stuck-transfer recovery | Transaction | Reconcile transfers interrupted by failures | M |
@@ -576,7 +576,8 @@ This section specifies correctness. Backend and Frontend must both read it.
 | Concept | Rule |
 |---|---|
 | Wallet | One per **customer or cash agent** (none for staff). Fields: `balance`, `held_amount`, `owner_status`, `owner_kind`, `owner_display_name`. `available = balance − held_amount`. |
-| Initial balance | Created on `UserRegistered` with a `TOPUP` ledger entry of `app.wallet.initial-balance` (default 1,000.00). Idempotent by user ID. |
+| Initial balance | Created on `UserRegistered` with a `TOPUP` ledger entry of `app.wallet.initial-balance` (default 1,000,000.00 for customers, 0 for cash agents). Idempotent by user ID. |
+| Amount scale | Simulated currency at PaySim magnitudes: initial balance 1,000,000.00, `app.transfer.max-amount` 10,000,000.00, and a **provisional** R5 threshold of 500,000.00 to be validated by ML Training. All are configuration properties. |
 | Ledger | **Append-only.** Entry types: `TOPUP`, `HOLD`, `RELEASE`, `DEBIT`, `CREDIT`. Each entry records amount, `balance_after`, `held_after`. No updates, no deletes. |
 | Invariant I1 | `balance` = Σ(TOPUP + CREDIT − DEBIT) of the wallet's ledger |
 | Invariant I2 | `held_amount` = Σ(HOLD − RELEASE) of the wallet's ledger |
@@ -663,16 +664,16 @@ There is no preview, no fingerprint and no freshness logic: because the only sco
 
 #### Transaction types
 
-ML Training trains on **all five PaySim types**. PaySim contains fraud **only** in `TRANSFER` and `CASH_OUT`; `PAYMENT`, `DEBIT` and `CASH_IN` are never fraudulent in the data. The application creates only `TRANSFER` and `CASH_OUT`, so those are the current types that reach the model in production.
+ML Training trains on **all five PaySim types**. PaySim contains fraud **only** in `TRANSFER` and `CASH_OUT`; `PAYMENT`, `DEBIT` and `CASH_IN` are never fraudulent in the data. The application creates only `TRANSFER` and `CASH_OUT`, so those are the only types that reach the model in production.
 
-| Type | In the application |  |
-|---|---|---|
-| `TRANSFER` | Yes (core: Transfer and accepted Payment Request) | 
-| `CASH_OUT` | **Should**: a "withdraw cash" operation to a seeded cash-agent account 
-| `CASH_IN` | Not offered. It corresponds to the admin top-up. | 
-| `PAYMENT`, `DEBIT` | Not offered (no merchants in the application) | 
+| Type | In the application |
+|---|---|
+| `TRANSFER` | Yes (core: Transfer and accepted Payment Request) |
+| `CASH_OUT` | Yes (core): a "withdraw cash" operation to a seeded cash-agent account |
+| `CASH_IN` | Not offered. It corresponds to the admin top-up. |
+| `PAYMENT`, `DEBIT` | Not offered (no merchants in the application) |
 
-#### Cash agents (Should)
+#### Cash agents
 
 - A cash agent is a seeded account with `accountKind = AGENT` (created through `POST /admin/users` or the seed tool). It has a normal wallet, so ledger invariants I1–I3 are unchanged.
 - `CASH_OUT` goes through `POST /transfers` with `type = CASH_OUT`. The receiver must be an agent. A `TRANSFER` receiver must be a regular customer. A mismatch returns `422 INVALID_RECEIVER_KIND`.
@@ -697,6 +698,8 @@ Rules are evaluated **in order**; the first match wins. `policy_version` is stor
 
 R1b is a **defensive rule**: the application only creates `TRANSFER` and `CASH_OUT`, so it normally never fires.
 
+**High-amount rule (R5).** Every transfer is scored by the model first. If the model is confident the transaction is legitimate but the amount is at or above `risk.policy.high-amount-threshold`, the transfer still goes to human review (`AMOUNT_HIGH`): a very large amount is not worth the risk of automatic approval. A `{fraud}` result is still rejected (R3) and an uncertain result still goes to review (R4). The threshold is provisional (500,000.00) and ML Training validates it against the in-scope amount distribution, so that it sends a controlled share of traffic to review. These cases are **rule-driven, not model-driven**, and the report must say so. They also guarantee that the analyst queue is exercised even when the model is very sharp. Load tests must include a controlled share of above-threshold amounts, otherwise the queue is never exercised or grows without bound.
+
 ML Serving may return an `action` field. It is treated as a **suggestion only**. The Risk service owns the final decision.
 
 **Overload behaviour (Should).** While ML is degraded, review cases are prioritised (large amounts first). If open cases exceed `risk.review.max-open`, new transfers are refused with `503 TEMPORARILY_UNAVAILABLE` and `Retry-After`, **before** funds are held.
@@ -717,7 +720,7 @@ The interface says **"transaction risk"**, never "scam probability": the model s
 
 ```mermaid
 stateDiagram-v2
-  [*] --> OPEN: binding decision = PENDING_REVIEW
+  [*] --> OPEN: decision = PENDING_REVIEW
   OPEN --> CLAIMED: analyst claims (soft lock)
   CLAIMED --> OPEN: claim expires or released
   OPEN --> APPROVED: analyst approves
@@ -1026,17 +1029,17 @@ PaySim fields appear only inside `decisions.features_json` and the ML contract. 
 ### 13.2 Table groups
 
 #### Group 1: Auth (schema `auth`)
-- **users**: identity and credentials (email, username, phone, password hash, role, enabled).
+- **users**: identity and credentials (email, username, phone, password hash, role, account kind, enabled).
 - **refresh_tokens**: hashed rotating refresh tokens with revocation and replacement chain.
 - **login_attempts**: durable record of every login attempt, source for lockout.
 - **service_clients**: machine credentials for `SERVICE` tokens.
 - **email_verification_tokens**, **password_reset_tokens** (Could): hashed single-use tokens.
 
 #### Group 2: Customer (schema `customer`)
-- **customers**: profile, simulated KYC status, account status, copies of identifiers used for lookup.
+- **customers**: profile, simulated KYC status, account status, account kind, copies of identifiers used for lookup.
 
 #### Group 3: Transaction (schema `transaction`)
-- **wallets**: balance, held amount, replicated owner status and display name.
+- **wallets**: balance, held amount, replicated owner status, kind and display name.
 - **ledger_entries**: append-only record of every balance or hold movement.
 - **transfers**: lifecycle of every money movement.
 - **payment_requests**: request lifecycle and link to the resulting transfer.
@@ -1395,7 +1398,7 @@ Base path: `/api/v1`. Internal paths (`/internal/**`) are never routed by the Ga
 | GET | `/auth/verify` | none | | Verify email by token (Could) |
 | POST | `/auth/forgot-password` | none | | Request reset email, always 200 (Could) |
 | POST | `/auth/reset-password` | none | | Reset password by token (Could) |
-| POST | `/admin/users` | ADMIN | | Create `ANALYST`, `ADMIN`, or a cash agent (Should) |
+| POST | `/admin/users` | ADMIN | | Create `ANALYST`, `ADMIN`, or a cash agent |
 | GET | `/.well-known/jwks.json` | internal | | Public keys for RS256 validation |
 | POST | `/internal/auth/service-token` | client credentials | | Issue `SERVICE` token |
 
@@ -1406,7 +1409,7 @@ Base path: `/api/v1`. Internal paths (`/internal/**`) are never routed by the Ga
 | GET | `/customers/me` | JWT | | Own profile |
 | PUT | `/customers/me` | JWT | | Update display name |
 | POST | `/customers/lookup` | CUSTOMER | | `{identifier}` → `{receiverId, maskedName}` or `404 RECEIVER_NOT_FOUND` (never returns agents) |
-| GET | `/customers/agents` | CUSTOMER | | List cash agents for withdrawals (Should) |
+| GET | `/customers/agents` | CUSTOMER | | List cash agents for withdrawals |
 | GET | `/customers` | ADMIN | | Search and list customers |
 | PATCH | `/customers/{id}/status` | ADMIN | | `ACTIVE` or `BLOCKED` |
 | GET | `/internal/customers/{id}` | SERVICE | | Full profile (case snapshots) |
@@ -1417,7 +1420,7 @@ Base path: `/api/v1`. Internal paths (`/internal/**`) are never routed by the Ga
 |---|---|---|:-:|---|
 | GET | `/wallet` | CUSTOMER | | Balance, held, available |
 | GET | `/wallet/ledger` | CUSTOMER | | Paginated ledger entries |
-| POST | `/transfers` | CUSTOMER | Y | Create a transfer (`type`: `TRANSFER`, or `CASH_OUT` as Should) |
+| POST | `/transfers` | CUSTOMER | Y | Create a transfer (`type`: `TRANSFER` or `CASH_OUT`) |
 | GET | `/transfers` | CUSTOMER | | Own transfers (sender or receiver), filters |
 | GET | `/transfers/{id}` | CUSTOMER | | Transfer detail (receiver sees no risk data) |
 | POST | `/payment-requests` | CUSTOMER | Y | Requester creates a live request (expires after `app.request.ttl`, default 2 minutes) |
@@ -1511,7 +1514,7 @@ Risk is the **only** Spring service that talks to ML Serving.
 }
 ```
 
-Feature names above are the **PaySim v0**. The `type` field uses the five PaySim values (`TRANSFER`, `CASH_OUT`, `PAYMENT`, `CASH_IN`, `DEBIT`) because the model is trained on all of them. Whether ML Serving will accept all five is still to be confirmed. The application sends only `TRANSFER` and `CASH_OUT`; other types never reach `/predict` (rule R1b). The final list is fixed with ML Training (section 24). `*_new_balance` values are **computed by the application** as the expected post-transfer balances, because the decision is made before execution.
+Feature names above are the **PaySim v0**. The `type` field uses the five PaySim values (`TRANSFER`, `CASH_OUT`, `PAYMENT`, `CASH_IN`, `DEBIT`) because the model is trained on all of them. ML Serving accepts all five (confirmed). The application sends only `TRANSFER` and `CASH_OUT`; other types never reach `/predict` (rule R1b). These six fields are the **frozen contract**: ML Serving computes any derived features (drain ratio, zero balance after, amount equals old balance) internally, so Risk never sends more than these six. `*_new_balance` values are **computed by the application** as the expected post-transfer balances, because the decision is made before execution.
 
 ### 17.2 Response
 
@@ -1535,7 +1538,7 @@ Feature names above are the **PaySim v0**. The `type` field uses the five PaySim
 - `prediction_set` ⊆ {`legit`, `fraud`}; it may be empty or contain both.
 - `uncertainty.score` ∈ [0, 1] is a scalar for dashboards and alerts. Its definition is owned by ML Serving.
 - `action` (`ALLOW`, `BLOCK`, `HUMAN_REVIEW`) is a **suggestion**. The Risk policy (section 11.7) decides.
-- `explanations` is optional and shown to analysts only.
+- `explanations` is optional and shown to analysts only. It must be computed cheaply (top 3 features from native model attributions). A per-request model-agnostic SHAP computation would break the latency budget in section 17.4.
 
 ### 17.3 Resilience configuration (Risk → ML)
 
@@ -1680,6 +1683,7 @@ classDiagram
     +String email
     +String username
     +ENUM role
+    +ENUM accountKind
     +Boolean enabled
   }
   class Customer {
@@ -1688,6 +1692,7 @@ classDiagram
     +String displayName
     +ENUM kycStatus
     +ENUM accountStatus
+    +ENUM accountKind
   }
   class Wallet {
     <<entity>>
@@ -1695,6 +1700,7 @@ classDiagram
     +BigDecimal balance
     +BigDecimal heldAmount
     +ENUM ownerStatus
+    +ENUM ownerKind
     +available() BigDecimal
   }
   class LedgerEntry {
@@ -1873,7 +1879,7 @@ React + TypeScript (strict) + Vite · MUI · TanStack Query · React Router · r
 | Public | Login, Register | Validation, generic error on bad credentials |
 | CUSTOMER | **Dashboard** | Balance, available, held, last 5 transactions, pending incoming requests badge, quick actions |
 | | **Send Money** | Identifier input → lookup → **confirm masked recipient** → amount → submit. Result screen per outcome (section 11.7 messages). |
-| | **Withdraw Cash** (Should) | Pick a cash agent from the list, enter an amount, submit. Same outcome screens as Send Money. |
+| | **Withdraw Cash** | Pick a cash agent from the list, enter an amount, submit. Same outcome screens as Send Money. |
 | | **Request Money** | Lookup, amount, note, submit |
 | | **Requests** | Tabs *Incoming* and *Outgoing*, status chips |
 | | **Incoming Request Pop-up** | Shown on any screen while a request is `PENDING`: requester (masked name), amount, note and a **2-minute countdown** (from the server's `expiresAt`, corrected with `serverTime`), Accept and Decline. **No risk information.** On expiry it closes and shows "Request expired". After Accept, the outcome message of section 11.7 is shown. |
@@ -1896,7 +1902,7 @@ React + TypeScript (strict) + Vite · MUI · TanStack Query · React Router · r
 | Tab | Content | Data source |
 |---|---|---|
 | Embeddings | Scatter of PCA, t-SNE or UMAP (method toggle), colour by class, **errors highlighted**, toggle for uncertain points, tooltip with features | `GET /risk/viz/{method}` |
-| Live decisions | Distribution of Approved/Review/Rejected, review rate over time, degraded ratio | `GET /risk/stats` |
+| Live decisions | Distribution of Approved/Review/Rejected, review rate over time split by reason (uncertain, high amount, degraded), degraded ratio | `GET /risk/stats` |
 | Model | Model name, version, metrics summary, conformal confidence level | `GET /risk/model-info` |
 
 Embeddings are **precomputed offline** (a sample of roughly 5,000–10,000 points) and served as static JSON. Nothing is computed per request.
@@ -1936,7 +1942,7 @@ Custom metrics (names are a contract with the dashboards):
 | `fintech_wallet_lock_wait_seconds` | timer | | Transaction |
 | `fintech_idempotent_replays_total` | counter | `endpoint` | Transaction |
 | `fintech_stuck_transfers_reconciled_total` | counter | | Transaction |
-| `fintech_decisions_total` | counter | `decision`, `degraded`, `scored` | Risk |
+| `fintech_decisions_total` | counter | `decision`, `reason`, `degraded`, `scored` | Risk |
 | `fintech_ml_call_seconds` | timer | `outcome` | Risk |
 | `fintech_review_cases_open` | gauge | `priority` | Risk |
 | `fintech_review_case_oldest_age_seconds` | gauge | | Risk |
@@ -1946,7 +1952,7 @@ Custom metrics (names are a contract with the dashboards):
 | `fintech_notifications_sent_total` | counter | `channel`, `outcome` | Notification |
 | `fintech_audit_events_total` | counter | `action` | Audit |
 
-Derived signals (PromQL, owned by DevOps/MLOps): uncertain ratio (`PENDING_REVIEW` over all decisions), which drives the "ML uncertainty high" alert; degraded ratio; review queue age; outbox backlog.
+Derived signals (PromQL, owned by DevOps/MLOps): uncertain ratio (decisions with reason `MODEL_UNCERTAIN` over all scored decisions, excluding `AMOUNT_HIGH` and `SERVICE_DEGRADED`), which drives the "ML uncertainty high" alert; degraded ratio; review queue age; outbox backlog.
 
 ### 22.3 Logs
 
@@ -1963,11 +1969,12 @@ JSON on stdout with `timestamp`, `level`, `service`, `correlationId`, `userId` (
 | API contract | springdoc spec + schema validation; MSW handlers generated from the same spec | Frontend and backend cannot drift |
 | Resilience | Resilience4j with a stub ML service | ML timeout → R2, circuit opens and recovers, review outcome retry |
 | Frontend | Vitest + React Testing Library + MSW | Forms, role guards, risk card behaviour, idempotency key reuse |
-| End-to-end | Playwright (run in CI) | (1) Register → send money → completed. (2) Payment request → accept within 2 minutes → review → analyst approves, plus an expired request. (3) Analyst rejects → funds released. |
+| End-to-end | Playwright (run in CI) | (1) Register → send money → completed, then withdraw cash to an agent. (2) Payment request → accept within 2 minutes → review → analyst approves, plus an expired request. (3) Analyst rejects → funds released. |
 | Invariants | `GET /admin/ledger/verify` | After every integration run and every chaos experiment |
 
 **Mandatory concurrency test:** 50 parallel transfers among 3 wallets, then assert I1–I3 and `balance ≥ 0`.
 **Coverage target:** at least 70% on the domain packages of `transaction` and `risk` (SonarQube gate), not a global percentage.
+**Outcome triggers for demos and E2E tests** (to confirm with the stub first, then with the real model): `APPROVED` is a partial transfer below the R5 threshold; `REJECTED` is a transfer of the whole balance to a new receiver (the drain pattern); `PENDING_REVIEW` is a transfer at or above the R5 threshold that the model approves, or any transfer while the ML stub is stopped (R2).
 **Test utilities:** a small ML stub service that mimics the `/predict` contract, a seed tool, and a simulator that replays PaySim-like traffic through the **public API** (never directly into the databases).
 
 ---
@@ -1988,7 +1995,7 @@ This section states what the application **needs from** and **provides to** each
 | Stateless services, multi-replica-safe jobs | HPA on Gateway, Transaction and Risk. Other services at 1–2 fixed replicas. |
 | `/internal/**` not routed by the Gateway | NetworkPolicies limiting internal calls (optional hardening) |
 | `GET /admin/ledger/verify` | Call it after every chaos experiment and record the result |
-| Seed tool and simulator | Use them to prepare data for load tests |
+| Seed tool (customers, analysts, admin, cash agents) and simulator | Use them to prepare data for load tests |
 | RabbitMQ (Should): outbox with a Publisher abstraction and an HTTP fallback | A broker deployment with persistence and a metrics endpoint, if the broker is adopted |
 
 **Resource budget to validate together (rough, to be measured):**
@@ -2008,11 +2015,12 @@ This section states what the application **needs from** and **provides to** each
 
 | The application provides | The application needs |
 |---|---|
-| Features available **at inference time**: `type`, `amount`, sender and receiver balances before and after, plus derivable values (balance-drain ratio, receiver wallet age, recent transfer counts) | **The final feature list, by 25 Oct**, with exact names and units, and a note on leak-prone features (PaySim `new_balance_*` fields are tightly tied to the label) |
+| The **frozen inference contract**: `type`, `amount`, `sender_old_balance`, `sender_new_balance`, `receiver_old_balance`, `receiver_new_balance` (section 17.1). Derived features are computed inside ML Serving. Receiver wallet age and activity counts exist only in the analyst case snapshot, not in `/predict`. | Confirmation that the contract is final **by 25 Oct**, and a check that the model does not depend on PaySim receiver-balance quirks (the application always sends consistent balances) |
 | The decision policy (section 11.7) so evaluation can be done at the **decision** level, not only per sample | The conformal prediction-set definition (confidence level and calibration set) |
 | The review-rate metric as a first-class target | A **target review rate** recommendation (for example no more than 5% of traffic): an unusable review queue invalidates the system |
 | | Visualisation artifacts: JSON for PCA, t-SNE, UMAP (about 5,000–10,000 sampled points with coordinates, true label, predicted label, uncertainty flag, a few feature values) |
-| | Validation of the high-amount threshold used by rule R5 |
+| | Validation of the high-amount threshold used by rule R5 against the in-scope amount distribution (a small, controlled share of traffic goes to review) |
+| | The model-driven review rate (reason `MODEL_UNCERTAIN`) reported separately from rule-driven reviews (`AMOUNT_HIGH`) |
 | | Locust scenarios: normal, high, overload, recovery |
 | | **Primary metrics reported on the `TRANSFER` + `CASH_OUT` subset** (the traffic the application serves), with all-types results as secondary. The decision to keep the other types is explained in the report. |
 | | Conformal calibration on the in-scope subset, or per type, so the coverage guarantee matches served traffic (in addition to the class-conditional calibration below) |
@@ -2026,7 +2034,6 @@ This section states what the application **needs from** and **provides to** each
 | The application provides | The application needs |
 |---|---|
 | A stub service that mimics the contract from day 1 | `POST /predict` exactly as in section 17 |
-| | **Open:** confirm whether `/predict` accepts all five `type` values or only `TRANSFER` and `CASH_OUT` |
 | Resilience configuration (section 17.3) | `GET /health/live` and `GET /health/ready` (ready only after model load) |
 | Latency budget (section 17.4) | **p95 inference below 300 ms** at the agreed concurrency |
 | | `GET /model-info` and `GET /viz/{pca\|tsne\|umap}` |
