@@ -17,11 +17,19 @@ from .schema import (
     NUMERIC_FEATURES,
     PAYSIM_TO_CONTRACT,
     TARGET,
+    TRANSACTION_TYPES,
 )
 
 
 def to_contract_frame(df: pd.DataFrame) -> pd.DataFrame:
-    """Map PaySim columns to the six production contract names."""
+    """Map PaySim columns to the six contract names, or pass contract frames through.
+
+    Training uses PaySim column names (``oldbalanceOrg``); serving receives the
+    contract names (``sender_old_balance``). The idempotent branch lets both
+    paths share ``build_features`` with zero training-serving skew.
+    """
+    if all(column in df.columns for column in CONTRACT_FEATURES):
+        return df[list(CONTRACT_FEATURES)].copy()
     missing = [c for c in PAYSIM_TO_CONTRACT if c not in df.columns]
     if missing:
         raise ValueError(f"Missing PaySim columns for contract mapping: {missing}")
@@ -53,14 +61,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_serving_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Contract-named frame -> derived features (serving input frame).
-
-    The serving layer receives the six contract fields (``sender_old_balance``,
-    etc.), not PaySim column names, so it must NOT call ``build_features``
-    (which expects ``oldbalanceOrg``, ...). This function is the serving-safe
-    counterpart of ``build_features``; both produce the same 10 columns.
-    """
-    return add_derived_features(df)
+    """Backward-compatible alias for ``build_features`` on contract-named rows."""
+    return build_features(df)
 
 
 def build_target(df: pd.DataFrame) -> pd.Series:
@@ -86,7 +88,11 @@ def build_preprocessor(numeric_features: list[str] | None = None) -> ColumnTrans
             ("num", StandardScaler(), numeric),
             (
                 "cat",
-                OneHotEncoder(handle_unknown="ignore", sparse_output=False),
+                OneHotEncoder(
+                    categories=[TRANSACTION_TYPES],
+                    handle_unknown="ignore",
+                    sparse_output=False,
+                ),
                 CATEGORICAL_FEATURES,
             ),
         ],

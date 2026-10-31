@@ -48,6 +48,10 @@ DERIVED_FEATURES = [
 FEATURE_COLUMNS = CONTRACT_FEATURES + DERIVED_FEATURES
 TARGET = "isFraud"
 
+# All five PaySim transaction types, in the canonical one-hot order used by
+# ML Serving's golden feature signature (14 transformed columns).
+TRANSACTION_TYPES = ["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"]
+
 # Model-input groups (after contract mapping + derived features).
 NUMERIC_FEATURES = [
     "amount",

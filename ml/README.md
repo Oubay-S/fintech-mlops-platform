@@ -36,7 +36,7 @@ To use a different location, set `PAYSIM_PATH=/path/to/paysim.parquet` (full) or
 
 ## Commands
 
-From the repository root:
+Use the Python 3.11 serving-compatible venv (`source ml/.venv/bin/activate`). From the repository root:
 
 ```bash
 # first EDA pass: stats + figures + report
@@ -60,8 +60,14 @@ python -m ml.training.scripts.run_benchmark --population app_valid_sample_100k -
 # temporal + destination-disjoint robustness
 python -m ml.training.scripts.run_robustness
 
-# Mondrian conformal + R1–R6 decision mix
+# Mondrian conformal + R1–R6 decision mix (add --log-mlflow to register fraud-detector)
 python -m ml.training.scripts.run_conformal --model xgb --confidence 0.99 --r5 500000 --r5-alt 324610
+
+# export PCA / t-SNE / UMAP JSON for GET /viz/{method}
+python -m ml.visualization.export_embeddings
+
+# assemble the serving handoff package (model card, metrics, parity cases)
+python -m ml.training.scripts.package_model
 
 # same on the 200k sample
 python -m ml.training.scripts.prepare_data --sample

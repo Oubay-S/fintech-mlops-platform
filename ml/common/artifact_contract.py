@@ -1,17 +1,17 @@
-"""Shared MLflow artifact contract for the fraud model (Roles 4 and 5).
+"""Canonical MLflow artifact contract shared by ML Training and ML Serving.
 
-Implementation referenced by ``mlflow-artifact-contract.md``. It defines:
+This is the single module both sides import. It keeps the serving-side
+``UncertaintyConfigContract`` API (feature_names / transformed_feature_names,
+MODEL_ARTIFACT_PATH, ...) while retaining the training-side metadata fields
+(dataset/feature-list version, calibration size, eval population) and the
+``log_pipeline`` helper.
 
-- the canonical experiment/model/alias names;
-- the ``uncertainty_config.json`` schema;
-- the Mondrian/split-conformal prediction-set rule used at serving;
-- an MLflow logging helper that logs the pipeline and the config in one run.
+Training logs with::
 
-The registered sklearn pipeline is **not** end-to-end from the raw six fields:
-the serving layer must call
-``ml.common.preprocessing.build_serving_features(raw_frame)`` before
-``pipeline.predict_proba(...)``. ``build_features`` is the PaySim-column
-training counterpart; both produce the same 10-column frame.
+    log_pipeline(pipeline, config, alias=PRODUCTION_ALIAS)
+
+Serving loads ``models:/fraud-detector@production`` plus the companion
+``uncertainty_config.json``.
 """
 from __future__ import annotations
 
@@ -21,14 +21,52 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .schema import CONTRACT_FEATURES, DERIVED_FEATURES
+from .schema import (
+    CONTRACT_FEATURES,
+    DERIVED_FEATURES,
+    NUMERIC_FEATURES,
+    TRANSACTION_TYPES,
+)
 
-MODEL_NAME = "fraud-detector"
-EXPERIMENT_NAME = "paysim-fraud-benchmark"
+# ---------------------------------------------------------------------------
+# 1. MLflow Registry & Experiment Naming Contract
+# ---------------------------------------------------------------------------
+DEFAULT_EXPERIMENT_NAME = "paysim-fraud-benchmark"
+EXPERIMENT_NAME = DEFAULT_EXPERIMENT_NAME
+REGISTERED_MODEL_NAME = "fraud-detector"
+MODEL_NAME = REGISTERED_MODEL_NAME
 PRODUCTION_ALIAS = "production"
 STAGING_ALIAS = "staging"
-UNCERTAINTY_CONFIG_FILENAME = "uncertainty_config.json"
+
+MODEL_ARTIFACT_PATH = "model"
+UNCERTAINTY_CONFIG_ARTIFACT = "uncertainty_config.json"
+UNCERTAINTY_CONFIG_FILENAME = UNCERTAINTY_CONFIG_ARTIFACT
 ARTIFACT_SCHEMA_VERSION = "1.0"
+
+# 14 transformed columns out of build_preprocessor() — the serving golden
+# signature. The OneHotEncoder is pinned to all five PaySim categories, even
+# when training data only contains TRANSFER/CASH_OUT.
+EXPECTED_TRANSFORMED_FEATURES: list[str] = list(NUMERIC_FEATURES) + [
+    f"type_{transaction_type}" for transaction_type in TRANSACTION_TYPES
+]
+
+REQUIRED_LOGGED_METRICS: tuple[str, ...] = (
+    "roc_auc",
+    "pr_auc",
+    "f1",
+    "precision",
+    "recall",
+    "mcc",
+    "brier_score",
+    "expected_review_rate",
+    "inference_p95_ms",
+)
+REQUIRED_RUN_TAGS: tuple[str, ...] = (
+    "algorithm",
+    "dataset_version",
+    "git_sha",
+    "seed",
+)
 
 
 def _utc_now() -> str:
@@ -37,39 +75,78 @@ def _utc_now() -> str:
 
 @dataclass
 class UncertaintyConfig:
-    """Companion artifact logged next to the MLflow sklearn model."""
+    """Schema for ``uncertainty_config.json`` (training + serving).
 
-    confidence_level: float
-    q_hat_fraud: float
-    q_hat_legit: float
+    Mondrian / split conformal:
+    - ``legit`` is in the set iff ``p_fraud <= q_hat_legit``.
+    - ``fraud`` is in the set iff ``1 - p_fraud <= q_hat_fraud``.
+    """
+
+    # Serving-facing fields
+    method: str = "split_conformal"
+    confidence_level: float = 0.95
     target_review_rate: float = 0.05
-    method: str = "mondrian_conformal"
+    q_hat_fraud: float = 0.60
+    q_hat_legit: float = 0.85
+    high_uncertainty_score_threshold: float = 0.50
+    algorithm: str = "UnknownClassifier"
+    trained_at: str = field(default_factory=_utc_now)
+    feature_names: list[str] = field(
+        default_factory=lambda: list(CONTRACT_FEATURES + DERIVED_FEATURES)
+    )
+    transformed_feature_names: list[str] = field(
+        default_factory=lambda: list(EXPECTED_TRANSFORMED_FEATURES)
+    )
+    metrics_summary: dict[str, Any] = field(default_factory=dict)
+
+    # Training-side metadata (ignored by the serving loader)
     schema_version: str = ARTIFACT_SCHEMA_VERSION
     contract_features: list[str] = field(default_factory=lambda: list(CONTRACT_FEATURES))
     derived_features: list[str] = field(default_factory=lambda: list(DERIVED_FEATURES))
     model_feature_names: list[str] = field(default_factory=list)
-    algorithm: str = "unknown"
-    trained_at: str = field(default_factory=_utc_now)
-    metrics_summary: dict[str, Any] = field(default_factory=dict)
     dataset_version: str = "paysim"
-    feature_list_version: str = "1.1"
-    eval_population: str = "app-valid TRANSFER+CASH_OUT"
+    feature_list_version: str = "1.2"
+    eval_population: str = "app-valid TRANSFER+CASH_OUT (serving-consistent)"
     calibration_rows: int = 0
     calibration_frauds: int = 0
 
+    def __post_init__(self) -> None:
+        if self.model_feature_names:
+            self.transformed_feature_names = list(self.model_feature_names)
+        else:
+            self.model_feature_names = list(self.transformed_feature_names)
+        if not self.feature_names:
+            self.feature_names = list(self.contract_features) + list(self.derived_features)
+
     def validate(self) -> None:
-        if not 0.5 < self.confidence_level < 1.0:
-            raise ValueError("confidence_level must be in (0.5, 1)")
+        if self.method not in ("split_conformal", "mondrian_conformal", "ensemble_bootstrap"):
+            raise ValueError(f"Unsupported uncertainty method: {self.method}")
+        if not 0.5 <= self.confidence_level <= 0.999:
+            raise ValueError(
+                f"confidence_level out of range [0.5, 0.999]: {self.confidence_level}"
+            )
         if not 0.0 < self.target_review_rate < 1.0:
-            raise ValueError("target_review_rate must be in (0, 1)")
+            raise ValueError(
+                f"target_review_rate must be in (0, 1): {self.target_review_rate}"
+            )
         for name in ("q_hat_fraud", "q_hat_legit"):
             value = getattr(self, name)
-            if not 0.0 <= value <= 1.0:
-                raise ValueError(f"{name} must be in [0, 1]")
-        if not self.contract_features:
-            raise ValueError("contract_features must not be empty")
-        if not self.derived_features:
-            raise ValueError("derived_features must not be empty")
+            if not 0.0 < value <= 1.0:
+                raise ValueError(f"{name} must be in (0, 1]: {value}")
+        if not self.contract_features or not self.derived_features:
+            raise ValueError("contract_features and derived_features must be non-empty")
+        expected_input = list(CONTRACT_FEATURES + DERIVED_FEATURES)
+        if list(self.feature_names) != expected_input:
+            raise ValueError(
+                f"Feature signature mismatch: model expects {self.feature_names}, "
+                f"serving pipeline produces {expected_input}"
+            )
+        if list(self.transformed_feature_names) != list(EXPECTED_TRANSFORMED_FEATURES):
+            raise ValueError(
+                "Transformed feature signature mismatch: model expects "
+                f"{self.transformed_feature_names}, serving pipeline produces "
+                f"{EXPECTED_TRANSFORMED_FEATURES}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
@@ -77,8 +154,42 @@ class UncertaintyConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "UncertaintyConfig":
-        known = {f.name for f in cls.__dataclass_fields__.values()}
-        config = cls(**{k: v for k, v in data.items() if k in known})
+        config = cls(
+            method=str(data.get("method", "split_conformal")),
+            confidence_level=float(data.get("confidence_level", 0.95)),
+            target_review_rate=float(data.get("target_review_rate", 0.05)),
+            q_hat_fraud=float(data.get("q_hat_fraud", 0.60)),
+            q_hat_legit=float(data.get("q_hat_legit", 0.85)),
+            high_uncertainty_score_threshold=float(
+                data.get("high_uncertainty_score_threshold", 0.50)
+            ),
+            algorithm=str(data.get("algorithm", "UnknownClassifier")),
+            trained_at=str(data.get("trained_at", _utc_now())),
+            feature_names=list(
+                data.get("feature_names", CONTRACT_FEATURES + DERIVED_FEATURES)
+            ),
+            transformed_feature_names=list(
+                data.get("transformed_feature_names", EXPECTED_TRANSFORMED_FEATURES)
+            ),
+            metrics_summary={
+                str(key): float(value)
+                for key, value in data.get("metrics_summary", {}).items()
+            },
+            schema_version=str(data.get("schema_version", ARTIFACT_SCHEMA_VERSION)),
+            contract_features=list(data.get("contract_features", CONTRACT_FEATURES)),
+            derived_features=list(data.get("derived_features", DERIVED_FEATURES)),
+            model_feature_names=list(data.get("model_feature_names", [])),
+            dataset_version=str(data.get("dataset_version", "paysim")),
+            feature_list_version=str(data.get("feature_list_version", "1.2")),
+            eval_population=str(
+                data.get(
+                    "eval_population",
+                    "app-valid TRANSFER+CASH_OUT (serving-consistent)",
+                )
+            ),
+            calibration_rows=int(data.get("calibration_rows", 0)),
+            calibration_frauds=int(data.get("calibration_frauds", 0)),
+        )
         config.validate()
         return config
 
@@ -92,13 +203,12 @@ class UncertaintyConfig:
         return cls.from_dict(json.loads(Path(path).read_text()))
 
 
-def prediction_set(p_fraud: float, config: UncertaintyConfig) -> list[str]:
-    """Mondrian/split-conformal prediction set for one fraud probability.
+# Serving-side canonical name
+UncertaintyConfigContract = UncertaintyConfig
 
-    ``legit`` is included iff ``p_fraud <= q_hat_legit``.
-    ``fraud`` is included iff ``1 - p_fraud <= q_hat_fraud``.
-    The empty set and the both-class set are valid.
-    """
+
+def prediction_set(p_fraud: float, config: UncertaintyConfig) -> list[str]:
+    """Mondrian/split-conformal prediction set for one fraud probability."""
     if not 0.0 <= p_fraud <= 1.0:
         raise ValueError("p_fraud must be in [0, 1]")
     result: list[str] = []
@@ -122,24 +232,42 @@ def log_pipeline(
     pipeline,
     config: UncertaintyConfig,
     *,
-    artifact_path: str = "model",
-    registered_model_name: str = MODEL_NAME,
+    artifact_path: str = MODEL_ARTIFACT_PATH,
+    registered_model_name: str = REGISTERED_MODEL_NAME,
+    alias: str | None = None,
     signature=None,
     input_example=None,
 ):
-    """Log the fitted sklearn pipeline and ``uncertainty_config.json`` in one run.
+    """Log the fitted sklearn pipeline + ``uncertainty_config.json`` in one run.
 
-    The caller owns the MLflow run/experiment. ``mlflow`` is imported lazily so
-    training and tests do not require it.
+    ``cloudpickle`` is forced so the ColumnTransformer survives the sklearn
+    version boundary; the alias is promoted after registration when provided.
+    The caller owns the MLflow run/experiment.
     """
     import mlflow
     import mlflow.sklearn
+    from mlflow.tracking import MlflowClient
 
-    mlflow.sklearn.log_model(
-        sk_model=pipeline,
-        artifact_path=artifact_path,
-        registered_model_name=registered_model_name,
-        signature=signature,
-        input_example=input_example,
-    )
-    mlflow.log_dict(config.to_dict(), UNCERTAINTY_CONFIG_FILENAME)
+    kwargs = {
+        "sk_model": pipeline,
+        "artifact_path": artifact_path,
+        "registered_model_name": registered_model_name,
+        "signature": signature,
+        "input_example": input_example,
+    }
+    try:
+        model_info = mlflow.sklearn.log_model(
+            serialization_format="cloudpickle", **kwargs
+        )
+    except TypeError:
+        # Older MLflow without the serialization_format parameter.
+        model_info = mlflow.sklearn.log_model(**kwargs)
+
+    mlflow.log_dict(config.to_dict(), UNCERTAINTY_CONFIG_ARTIFACT)
+
+    version = getattr(model_info, "registered_model_version", None)
+    if alias and version:
+        MlflowClient().set_registered_model_alias(
+            name=registered_model_name, alias=alias, version=str(version)
+        )
+    return model_info

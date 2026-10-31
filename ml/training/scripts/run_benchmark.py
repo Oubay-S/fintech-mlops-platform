@@ -141,7 +141,10 @@ def run_fold(
 
     model = make_model(model_name, model_spec, y_train, seed)
     pipeline = Pipeline(
-        [("prep", build_preprocessor(PROTOCOLS[protocol])), ("clf", model)]
+        [
+            ("preprocessor", build_preprocessor(PROTOCOLS[protocol])),
+            ("classifier", model),
+        ]
     )
 
     start = time.perf_counter()
@@ -162,7 +165,9 @@ def run_fold(
         "seed": seed,
         "n_train": int(len(train_df)),
         "n_test": int(len(test_df)),
-        "n_features": int(len(pipeline.named_steps["prep"].get_feature_names_out())),
+        "n_features": int(
+            len(pipeline.named_steps["preprocessor"].get_feature_names_out())
+        ),
         "train_seconds": float(train_seconds),
         "predict_ms_per_row": float(predict_seconds / len(test_df) * 1000),
         **{f"cm_{key}": value for key, value in confusion.items()},
@@ -333,6 +338,11 @@ def main() -> None:
         action="store_true",
         help="append to an existing results CSV (dedupe by population/model/protocol/fold/seed)",
     )
+    parser.add_argument(
+        "--log-mlflow",
+        action="store_true",
+        help="log the benchmark result CSV/report as MLflow artifacts",
+    )
     args = parser.parse_args()
 
     config = yaml.safe_load(Path(args.config).read_text())
@@ -410,6 +420,28 @@ def main() -> None:
 
     summary_path = output_path.with_suffix(".populations.json")
     summary_path.write_text(json.dumps(population_summaries, indent=2))
+
+    if args.log_mlflow:
+        import mlflow
+
+        from ml.common.artifact_contract import DEFAULT_EXPERIMENT_NAME
+
+        mlflow.set_experiment(DEFAULT_EXPERIMENT_NAME)
+        with mlflow.start_run(
+            run_name=f"benchmark-{args.protocol}-{'-'.join(population_names)}"
+        ):
+            mlflow.log_params(
+                {
+                    "protocol": args.protocol,
+                    "populations": ",".join(population_names),
+                    "models": ",".join(model_names),
+                    "folds": folds,
+                    "seeds": ",".join(str(seed) for seed in seeds),
+                }
+            )
+            mlflow.log_artifact(str(output_path))
+            mlflow.log_artifact(str(report_path))
+            mlflow.log_artifact(str(summary_path))
 
     print(f"\nResults: {output_path}")
     print(f"Report:  {report_path}")

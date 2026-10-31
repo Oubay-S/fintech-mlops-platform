@@ -29,7 +29,10 @@
     "receiver_gain_ratio",
     "sender_zero_after",
     "amount_equals_old_balance",
+    "type_CASH_IN",
     "type_CASH_OUT",
+    "type_DEBIT",
+    "type_PAYMENT",
     "type_TRANSFER"
   ],
   "algorithm": "XGBClassifier",
@@ -63,5 +66,33 @@
   "feature_list_version": "1.2",
   "eval_population": "app-valid TRANSFER+CASH_OUT (serving-consistent)",
   "calibration_rows": 45082,
-  "calibration_frauds": 1307
+  "calibration_frauds": 1307,
+  "feature_names": [
+    "type",
+    "amount",
+    "sender_old_balance",
+    "sender_new_balance",
+    "receiver_old_balance",
+    "receiver_new_balance",
+    "balance_drain_ratio",
+    "receiver_gain_ratio",
+    "sender_zero_after",
+    "amount_equals_old_balance"
+  ],
+  "transformed_feature_names": [
+    "amount",
+    "sender_old_balance",
+    "sender_new_balance",
+    "receiver_old_balance",
+    "receiver_new_balance",
+    "balance_drain_ratio",
+    "receiver_gain_ratio",
+    "sender_zero_after",
+    "amount_equals_old_balance",
+    "type_CASH_IN",
+    "type_CASH_OUT",
+    "type_DEBIT",
+    "type_PAYMENT",
+    "type_TRANSFER"
+  ]
 }

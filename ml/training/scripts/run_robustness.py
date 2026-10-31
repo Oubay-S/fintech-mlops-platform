@@ -95,7 +95,9 @@ def evaluate(
     amounts = test_df["amount"].to_numpy()
 
     model = make_model("xgb", benchmark["models"]["xgb"], y_fit, seed)
-    pipeline = Pipeline([("prep", build_preprocessor()), ("clf", model)])
+    pipeline = Pipeline(
+        [("preprocessor", build_preprocessor()), ("classifier", model)]
+    )
     pipeline.fit(x_fit, y_fit)
     p_cal = pipeline.predict_proba(x_cal)[:, 1]
     p_test = pipeline.predict_proba(x_test)[:, 1]
@@ -111,7 +113,8 @@ def evaluate(
         method="mondrian_conformal",
         algorithm=type(model).__name__,
         model_feature_names=[
-            str(name) for name in pipeline.named_steps["prep"].get_feature_names_out()
+            str(name)
+            for name in pipeline.named_steps["preprocessor"].get_feature_names_out()
         ],
         calibration_rows=int(len(cal_df)),
         calibration_frauds=int(y_cal.sum()),

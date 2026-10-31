@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from ml.common.artifact_contract import (
+    EXPECTED_TRANSFORMED_FEATURES,
     UncertaintyConfig,
     prediction_set,
     suggested_action,
@@ -20,7 +21,7 @@ def _config() -> UncertaintyConfig:
         q_hat_legit=0.00007,
         target_review_rate=0.05,
         algorithm="LogisticRegression",
-        model_feature_names=["amount", "sender_old_balance", "type_TRANSFER"],
+        model_feature_names=list(EXPECTED_TRANSFORMED_FEATURES),
     )
 
 

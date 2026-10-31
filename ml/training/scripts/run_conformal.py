@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import time
 from pathlib import Path
 
@@ -152,6 +153,16 @@ def main() -> None:
     parser.add_argument("--uncertainty", default=str(DEFAULT_UNCERTAINTY))
     parser.add_argument("--metrics", default=str(DEFAULT_METRICS))
     parser.add_argument("--model-path", default=str(DEFAULT_MODEL))
+    parser.add_argument(
+        "--log-mlflow",
+        action="store_true",
+        help="log the champion pipeline + uncertainty_config.json to MLflow and register it",
+    )
+    parser.add_argument(
+        "--mlflow-tracking-uri",
+        default=None,
+        help="override MLFLOW_TRACKING_URI (e.g. http://localhost:5000)",
+    )
     args = parser.parse_args()
 
     alpha = 1.0 - args.confidence
@@ -175,7 +186,9 @@ def main() -> None:
     amounts = test_df["amount"].to_numpy()
 
     model = make_model(args.model, model_spec, y_fit, args.seed)
-    pipeline = Pipeline([("prep", build_preprocessor()), ("clf", model)])
+    pipeline = Pipeline(
+        [("preprocessor", build_preprocessor()), ("classifier", model)]
+    )
     pipeline.fit(x_fit, y_fit)
     p_cal = pipeline.predict_proba(x_cal)[:, 1]
     p_test = pipeline.predict_proba(x_test)[:, 1]
@@ -189,7 +202,10 @@ def main() -> None:
         target_review_rate=0.05,
         method="mondrian_conformal",
         algorithm=type(model).__name__,
-        model_feature_names=[str(name) for name in pipeline.named_steps["prep"].get_feature_names_out()],
+        model_feature_names=[
+            str(name)
+            for name in pipeline.named_steps["preprocessor"].get_feature_names_out()
+        ],
         calibration_rows=int(len(cal_df)),
         calibration_frauds=int(y_cal.sum()),
         eval_population="app-valid TRANSFER+CASH_OUT (serving-consistent)",
@@ -241,6 +257,74 @@ def main() -> None:
         "r5_alternative": args.r5_alt,
     }
     config.validate()
+
+    if args.log_mlflow:
+        import mlflow
+        from mlflow.models import infer_signature
+
+        from ml.common.artifact_contract import (
+            DEFAULT_EXPERIMENT_NAME,
+            MODEL_ARTIFACT_PATH,
+            PRODUCTION_ALIAS,
+            REGISTERED_MODEL_NAME,
+            log_pipeline,
+        )
+
+        if args.mlflow_tracking_uri:
+            mlflow.set_tracking_uri(args.mlflow_tracking_uri)
+        mlflow.set_experiment(DEFAULT_EXPERIMENT_NAME)
+        try:
+            git_sha = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True
+            ).strip()
+        except Exception:  # noqa: BLE001
+            git_sha = "unknown"
+        signature = infer_signature(
+            x_fit.head(5), pipeline.predict_proba(x_fit.head(5))
+        )
+        with mlflow.start_run(run_name=f"champion-{args.model}-conformal"):
+            mlflow.set_tags(
+                {
+                    "algorithm": type(model).__name__,
+                    "dataset_version": config.dataset_version,
+                    "eval_population": config.eval_population,
+                    "git_sha": git_sha,
+                    "seed": str(args.seed),
+                    "protocol": "contract",
+                }
+            )
+            mlflow.log_metrics(
+                {
+                    "roc_auc": float(test_metrics["roc_auc"] or 0.0),
+                    "pr_auc": float(test_metrics["pr_auc"] or 0.0),
+                    "f1": float(test_metrics["f1"]),
+                    "precision": float(test_metrics["precision"]),
+                    "recall": float(test_metrics["recall"]),
+                    "mcc": float(test_metrics["mcc"]),
+                    "brier_score": float(test_metrics["brier"]),
+                    "expected_review_rate": float(mix_base["review_pct"] / 100.0),
+                    "human_review_rate_transfer_cashout": float(
+                        mix_base["review_pct"] / 100.0
+                    ),
+                    "model_uncertain_rate": float(mix_base["model_driven_pct"] / 100.0),
+                    "amount_high_rate": float(mix_base["rule_driven_pct"] / 100.0),
+                    "inference_p95_ms": float(p95),
+                    "q_hat_fraud": float(q_fraud),
+                    "q_hat_legit": float(q_legit),
+                    "coverage_legit": float(coverage["coverage_legit"]),
+                    "coverage_fraud": float(coverage["coverage_fraud"]),
+                    "hard_subset_recall": float(hard["recall"]),
+                }
+            )
+            log_pipeline(
+                pipeline=pipeline,
+                config=config,
+                artifact_path=MODEL_ARTIFACT_PATH,
+                registered_model_name=REGISTERED_MODEL_NAME,
+                alias=PRODUCTION_ALIAS,
+                signature=signature,
+                input_example=x_fit.head(3),
+            )
 
     uncertainty_path = resolve(args.uncertainty)
     config.save(uncertainty_path)
