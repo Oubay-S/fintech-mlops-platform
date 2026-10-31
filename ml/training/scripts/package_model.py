@@ -283,9 +283,15 @@ def main() -> None:
     }
     (output / "parity_cases.json").write_text(json.dumps(parity, indent=2))
 
+    model_path = resolve(args.model)
+    try:
+        model_path_label = str(model_path.relative_to(REPO_ROOT))
+    except ValueError:
+        model_path_label = str(model_path)
+
     manifest = {
         "generated_at": generated_at,
-        "model_path": str(resolve(args.model)),
+        "model_path": model_path_label,
         "files": [
             "uncertainty_config.json",
             "metrics_summary.json",
