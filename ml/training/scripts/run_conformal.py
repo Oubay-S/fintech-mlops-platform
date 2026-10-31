@@ -183,6 +183,7 @@ def main() -> None:
     y_cal = build_target(cal_df).to_numpy()
     x_test = build_features(test_df)
     y_test = build_target(test_df).to_numpy()
+    n_frauds = int(y_test.sum())
     amounts = test_df["amount"].to_numpy()
 
     model = make_model(args.model, model_spec, y_fit, args.seed)
@@ -429,15 +430,20 @@ def main() -> None:
         "R2 (`SERVICE_DEGRADED`) and R1b (`TYPE_NOT_SCORED`) are not simulated; the app only",
         "creates TRANSFER/CASH_OUT and the ML service is assumed available.",
         "",
-        "**R5 validation:** 500,000 → **1.354%** total review (0.903% model + 0.451% rule), all",
-        "1,634 frauds caught, 0 legitimate rejected. 324,610 → **3.906%** total review",
-        "(0.903% + 3.003%), same frauds. Both are ≤5%; 500,000 is conservative, 324,610 uses",
+        f"**R5 validation:** {mix_base['r5_threshold']:,.0f} → **{mix_base['review_pct']:.3f}%** total review "
+        f"({mix_base['model_driven_pct']:.3f}% model + {mix_base['rule_driven_pct']:.3f}% rule),",
+        f"all {mix_base['frauds']:,} frauds caught, {mix_base['legit_R3']} legitimate rejected. "
+        f"{mix_alt['r5_threshold']:,.0f} → **{mix_alt['review_pct']:.3f}%** total review",
+        f"({mix_alt['model_driven_pct']:.3f}% + {mix_alt['rule_driven_pct']:.3f}%), same frauds. "
+        f"Both are ≤5%; {mix_base['r5_threshold']:,.0f} is conservative, "
+        f"{mix_alt['r5_threshold']:,.0f} uses",
         "more of the review budget.",
         "",
-        "**Coverage note:** 17/1,634 frauds fall outside the prediction set (coverage 98.96%,",
-        "close to the 99% target); all 17 are empty-set R4 review, so no fraud is auto-approved.",
-        "If strict 99% coverage is required, raise the confidence to 99.5% or enlarge the",
-        "calibration set.",
+        f"**Coverage note:** {n_frauds - int(round(coverage['coverage_fraud'] * n_frauds)):,}/{n_frauds:,} "
+        f"frauds fall outside the prediction set (coverage {coverage['coverage_fraud']*100:.2f}%,",
+        f"close to the {args.confidence*100:.0f}% target); all uncovered frauds are empty-set R4 review, "
+        "so no fraud is auto-approved.",
+        "If strict coverage is required, raise the confidence or enlarge the calibration set.",
         "",
         "## Raw-PaySim sensitivity (same model/q-hats)",
         "",

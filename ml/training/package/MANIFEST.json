@@ -1,0 +1,14 @@
+{
+  "generated_at": "2026-10-31T23:41:22.123754+00:00",
+  "model_path": "/home/soulaymane/dev/learning/jee-ml/fintech-mlops-platform/ml/data/processed/final_contract_model.joblib",
+  "files": [
+    "uncertainty_config.json",
+    "metrics_summary.json",
+    "model_card.md",
+    "parity_cases.json",
+    "feature_list_v1.md"
+  ],
+  "feature_list_version": "1.2",
+  "dataset_version": "paysim",
+  "eval_population": "app-valid TRANSFER+CASH_OUT (serving-consistent)"
+}

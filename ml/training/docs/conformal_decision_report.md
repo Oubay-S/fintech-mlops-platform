@@ -18,17 +18,17 @@ the raw PaySim view is reported as a sensitivity.
 
 ## Conformal thresholds
 
-- q̂_fraud = **0.000118**
-- q̂_legit = **0.000053**
+- q̂_fraud = **0.000105**
+- q̂_legit = **0.000045**
 
 ## Test coverage and set size
 
 | Metric | Value |
 |---|---:|
-| Coverage — legit | 99.10% |
+| Coverage — legit | 99.07% |
 | Coverage — fraud | 98.96% |
 | Average set size | 0.991 |
-| Empty / singleton / both | 509 / 55,843 / 0 |
+| Empty / singleton / both | 527 / 55,825 / 0 |
 
 ## Model metrics (test, 0.5 threshold)
 
@@ -44,7 +44,7 @@ the raw PaySim view is reported as a sensitivity.
 | Hard-subset rows / frauds | 54,749 / 31 |
 | Hard-subset recall | 1.0000 |
 | Rule baseline recall | 0.9810 |
-| Inference p95 | 12.932 ms |
+| Inference p95 | 4.220 ms |
 
 **Read this as the PaySim ceiling:** the model is the drain rule plus the hard subset;
 the decision mix below is the meaningful result.
@@ -53,30 +53,29 @@ the decision mix below is the meaningful result.
 
 | R5 threshold | R3 rejected | R4 model-uncertain | R5 amount-high | R6 approved | Review | Model-driven | Rule-driven | Frauds caught / missed | Legit in R3 |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 500,000 | 2.869% | 0.903% | 0.451% | 95.777% | **1.354%** | 0.903% | 0.451% | 1634/1634 (missed 0) | 0 |
-| 324,610 | 2.869% | 0.903% | 3.003% | 93.225% | **3.906%** | 0.903% | 3.003% | 1634/1634 (missed 0) | 0 |
+| 500,000 | 2.869% | 0.935% | 0.387% | 95.808% | **1.322%** | 0.935% | 0.387% | 1634/1634 (missed 0) | 0 |
+| 324,610 | 2.869% | 0.935% | 2.816% | 93.379% | **3.751%** | 0.935% | 2.816% | 1634/1634 (missed 0) | 0 |
 
 R5 is **rule-driven**: every transfer is scored first; a confident-legit result above
 the threshold goes to review (`AMOUNT_HIGH`). R4 is **model-driven** (`MODEL_UNCERTAIN`).
 R2 (`SERVICE_DEGRADED`) and R1b (`TYPE_NOT_SCORED`) are not simulated; the app only
 creates TRANSFER/CASH_OUT and the ML service is assumed available.
 
-**R5 validation:** 500,000 → **1.354%** total review (0.903% model + 0.451% rule), all
-1,634 frauds caught, 0 legitimate rejected. 324,610 → **3.906%** total review
-(0.903% + 3.003%), same frauds. Both are ≤5%; 500,000 is conservative, 324,610 uses
+**R5 validation:** 500,000 → **1.322%** total review (0.935% model + 0.387% rule),
+all 1,634 frauds caught, 0 legitimate rejected. 324,610 → **3.751%** total review
+(0.935% + 2.816%), same frauds. Both are ≤5%; 500,000 is conservative, 324,610 uses
 more of the review budget.
 
 **Coverage note:** 17/1,634 frauds fall outside the prediction set (coverage 98.96%,
-close to the 99% target); all 17 are empty-set R4 review, so no fraud is auto-approved.
-If strict 99% coverage is required, raise the confidence to 99.5% or enlarge the
-calibration set.
+close to the 99% target); all uncovered frauds are empty-set R4 review, so no fraud is auto-approved.
+If strict coverage is required, raise the confidence or enlarge the calibration set.
 
 ## Raw-PaySim sensitivity (same model/q-hats)
 
 | View | Coverage legit | Coverage fraud | R4 % | R5 % | Review % |
 |---|---:|---:|---:|---:|---:|
-| Serving-consistent | 99.10% | 98.96% | 0.903% | 0.451% | 1.354% |
-| Raw PaySim | 99.12% | 98.04% | 0.907% | 0.447% | 1.354% |
+| Serving-consistent | 99.07% | 98.96% | 0.935% | 0.387% | 1.322% |
+| Raw PaySim | 99.08% | 98.10% | 0.946% | 0.383% | 1.329% |
 
 **Full-drain note:** a legitimate whole-balance transfer is flagged `{fraud}` and rejected by R3.
 V2.2 uses this as the demo `REJECTED` case; the legitimate-user UX remains open.
