@@ -60,11 +60,14 @@ python -m ml.training.scripts.run_benchmark --population app_valid_sample_100k -
 # temporal + destination-disjoint robustness
 python -m ml.training.scripts.run_robustness
 
-# Mondrian conformal + R1–R6 decision mix (add --log-mlflow to register fraud-detector)
+# Mondrian conformal + R1–R6 decision mix (--log-mlflow registers @candidate; the gate promotes)
 python -m ml.training.scripts.run_conformal --model xgb --confidence 0.99 --r5 500000 --r5-alt 324610
 
 # export PCA / t-SNE / UMAP JSON for GET /viz/{method}
 python -m ml.visualization.export_embeddings
+
+# statistical validation JSON for the MLOps gate (run before --log-mlflow)
+python -m ml.training.scripts.run_statistics
 
 # assemble the serving handoff package (model card, metrics, parity cases)
 python -m ml.training.scripts.package_model

@@ -8,14 +8,18 @@ MODEL_ARTIFACT_PATH, ...) while retaining the training-side metadata fields
 
 Training logs with::
 
-    log_pipeline(pipeline, config, alias=PRODUCTION_ALIAS)
+    log_pipeline(pipeline, config, alias=CANDIDATE_ALIAS)
 
-Serving loads ``models:/fraud-detector@production`` plus the companion
+The MLOps gate (``validate_gate.py`` + ``promote_model.py``) promotes the
+candidate to ``@staging``/``@production``. Serving loads
+``models:/fraud-detector@production`` plus the companion
 ``uncertainty_config.json``.
 """
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,8 +39,10 @@ DEFAULT_EXPERIMENT_NAME = "paysim-fraud-benchmark"
 EXPERIMENT_NAME = DEFAULT_EXPERIMENT_NAME
 REGISTERED_MODEL_NAME = "fraud-detector"
 MODEL_NAME = REGISTERED_MODEL_NAME
-PRODUCTION_ALIAS = "production"
+CANDIDATE_ALIAS = "candidate"
 STAGING_ALIAS = "staging"
+PRODUCTION_ALIAS = "production"
+DATA_SOURCE = "paysim"
 
 MODEL_ARTIFACT_PATH = "model"
 UNCERTAINTY_CONFIG_ARTIFACT = "uncertainty_config.json"
@@ -64,8 +70,10 @@ REQUIRED_LOGGED_METRICS: tuple[str, ...] = (
 REQUIRED_RUN_TAGS: tuple[str, ...] = (
     "algorithm",
     "dataset_version",
+    "data_source",
     "git_sha",
     "seed",
+    "uncertainty_config_sha256",
 )
 
 
@@ -242,12 +250,16 @@ def log_pipeline(
     alias: str | None = None,
     signature=None,
     input_example=None,
+    config_path: str | Path | None = None,
 ):
     """Log the fitted sklearn pipeline + ``uncertainty_config.json`` in one run.
 
     ``cloudpickle`` is forced so the ColumnTransformer survives the sklearn
     version boundary; the alias is promoted after registration when provided.
-    The caller owns the MLflow run/experiment.
+    When ``config_path`` is given, that exact file bytes are logged (so the
+    caller can tag ``uncertainty_config_sha256`` atomically); otherwise the
+    config is serialized with ``mlflow.log_dict``. The caller owns the MLflow
+    run/experiment.
     """
     import mlflow
     import mlflow.sklearn
@@ -268,7 +280,14 @@ def log_pipeline(
         # Older MLflow without the serialization_format parameter.
         model_info = mlflow.sklearn.log_model(**kwargs)
 
-    mlflow.log_dict(config.to_dict(), UNCERTAINTY_CONFIG_ARTIFACT)
+    if config_path is not None:
+        # Always log under the canonical name, regardless of the local path.
+        with tempfile.TemporaryDirectory(prefix="mlflow_uncertainty_") as tmp_dir:
+            canonical = Path(tmp_dir) / UNCERTAINTY_CONFIG_ARTIFACT
+            shutil.copyfile(config_path, canonical)
+            mlflow.log_artifact(str(canonical))
+    else:
+        mlflow.log_dict(config.to_dict(), UNCERTAINTY_CONFIG_ARTIFACT)
 
     version = getattr(model_info, "registered_model_version", None)
     if alias and version:

@@ -14,10 +14,17 @@ V2.2 parameters:
 Run from the repository root:
 
     python -m ml.training.scripts.run_conformal --model xgb
+
+With ``--log-mlflow`` the run registers the model under the ``candidate``
+alias, tags ``data_source=paysim`` and ``uncertainty_config_sha256``, and logs
+``statistical_validation.json``. The MLOps pipeline (``validate_gate.py`` +
+``promote_model.py``) promotes the candidate to ``@staging`` then
+``@production``.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import time
@@ -45,6 +52,7 @@ DEFAULT_CONFIG = ML_DIR / "training" / "configs" / "benchmark.yaml"
 DEFAULT_REPORT = ML_DIR / "training" / "docs" / "conformal_decision_report.md"
 DEFAULT_UNCERTAINTY = ML_DIR / "training" / "docs" / "uncertainty_config.json"
 DEFAULT_METRICS = ML_DIR / "training" / "results" / "conformal_metrics.json"
+DEFAULT_STATISTICS = ML_DIR / "training" / "results" / "statistical_validation.json"
 DEFAULT_MODEL = ML_DIR / "data" / "processed" / "final_contract_model.joblib"
 TRANSFER_TYPES = ["TRANSFER", "CASH_OUT"]
 R5_BASE = 500_000.0
@@ -153,6 +161,11 @@ def main() -> None:
     parser.add_argument("--metrics", default=str(DEFAULT_METRICS))
     parser.add_argument("--model-path", default=str(DEFAULT_MODEL))
     parser.add_argument(
+        "--statistics-json",
+        default=str(DEFAULT_STATISTICS),
+        help="statistical_validation.json to log as an MLflow artifact",
+    )
+    parser.add_argument(
         "--log-mlflow",
         action="store_true",
         help="log the champion pipeline + uncertainty_config.json to MLflow and register it",
@@ -258,17 +271,33 @@ def main() -> None:
     }
     config.validate()
 
+    # Save the canonical config before logging so the SHA-256 tag and the
+    # logged artifact refer to the exact same bytes (atomic serving coupling).
+    uncertainty_path = resolve(args.uncertainty)
+    uncertainty_path.parent.mkdir(parents=True, exist_ok=True)
+    config.save(uncertainty_path)
+    uncertainty_sha256 = hashlib.sha256(uncertainty_path.read_bytes()).hexdigest()
+
     if args.log_mlflow:
         import mlflow
         from mlflow.models import infer_signature
 
         from ml.common.artifact_contract import (
+            CANDIDATE_ALIAS,
+            DATA_SOURCE,
             DEFAULT_EXPERIMENT_NAME,
             MODEL_ARTIFACT_PATH,
-            PRODUCTION_ALIAS,
             REGISTERED_MODEL_NAME,
             log_pipeline,
         )
+
+        statistics_path = resolve(args.statistics_json)
+        if not statistics_path.exists():
+            raise FileNotFoundError(
+                f"{statistics_path} not found. Run "
+                "`python -m ml.training.scripts.run_statistics` before "
+                "`run_conformal --log-mlflow`."
+            )
 
         if args.mlflow_tracking_uri:
             mlflow.set_tracking_uri(args.mlflow_tracking_uri)
@@ -287,10 +316,12 @@ def main() -> None:
                 {
                     "algorithm": type(model).__name__,
                     "dataset_version": config.dataset_version,
+                    "data_source": DATA_SOURCE,
                     "eval_population": config.eval_population,
                     "git_sha": git_sha,
                     "seed": str(args.seed),
                     "protocol": "contract",
+                    "uncertainty_config_sha256": uncertainty_sha256,
                 }
             )
             mlflow.log_metrics(
@@ -321,13 +352,13 @@ def main() -> None:
                 config=config,
                 artifact_path=MODEL_ARTIFACT_PATH,
                 registered_model_name=REGISTERED_MODEL_NAME,
-                alias=PRODUCTION_ALIAS,
+                alias=CANDIDATE_ALIAS,
                 signature=signature,
                 input_example=x_fit.head(3),
+                config_path=uncertainty_path,
             )
+            mlflow.log_artifact(str(statistics_path))
 
-    uncertainty_path = resolve(args.uncertainty)
-    config.save(uncertainty_path)
     model_path = resolve(args.model_path)
     model_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump({"pipeline": pipeline, "config": config.to_dict()}, model_path)

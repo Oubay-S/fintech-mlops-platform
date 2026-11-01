@@ -42,7 +42,7 @@ The unmodified current serving suite fails 2 parity tests against this model
 | Trained pipeline, preprocessing, conformal config, metrics, feature list, model card, parity fixture, viz JSON | **Role 4** | Delivered in this branch / package |
 | FastAPI `/predict`, `/model-info`, `/viz`, health, serving-side conformal set, parity test | **Role 5** | Loads the artifact from MLflow |
 | MLflow server, backend store, artifact store (MinIO/S3) | **Role 3** | `docs/conventions.md` §1; V2.2 §2.2 says “ML Serving + DevOps/MLOps” |
-| Model registration, `@production` alias, registry usage | **Role 5** (Role 4 supports) | Role 4 can re-log from the training branch |
+| Model registration, `@candidate` alias, registry usage | **Role 5** (Role 4 supports) | MLOps `validate_gate.py` + `promote_model.py` promote to `@staging`/`@production` |
 | Docker/K8s, HPA, monitoring, secrets | **Role 3** | Serving image is built by Role 5 |
 | Phase 9 load tests | **Role 4** | Needs a running endpoint + cluster access |
 
@@ -109,10 +109,13 @@ All paths are relative to the repository root.
 | Final config (canonical) | `ml/training/docs/uncertainty_config.json` | Same content as package copy |
 | Contract modules | `ml/common/{artifact_contract,schema,preprocessing}.py` | Shared by training and serving |
 
-The trained pipeline itself is delivered through MLflow
-(`models:/fraud-detector@production`), not as a committed binary. The local
-joblib at `ml/data/processed/final_contract_model.joblib` is git-ignored and
-is only a fallback.
+The trained pipeline itself is delivered through MLflow, not as a committed
+binary. Training logs it as **`@candidate`**; the MLOps pipeline
+(`validate_gate.py` + `promote_model.py`) promotes it to `@staging` then
+`@production`. Serving loads `@production` once promoted (or `@candidate` for
+pre-promotion parity). The local joblib at
+`ml/data/processed/final_contract_model.joblib` is git-ignored and is only a
+fallback.
 
 ---
 
@@ -139,7 +142,7 @@ import mlflow.sklearn
 from ml.common.artifact_contract import UncertaintyConfigContract
 from ml.common.preprocessing import build_features
 
-model = mlflow.sklearn.load_model("models:/fraud-detector@production")
+model = mlflow.sklearn.load_model("models:/fraud-detector@production")  # or @candidate pre-promotion
 config = UncertaintyConfigContract.from_dict(config_dict)  # from the run artifact
 features = build_features(contract_frame)                  # 10 columns
 p_fraud = float(model.predict_proba(features)[:, 1][0])
@@ -200,7 +203,7 @@ and ran:
 
 - the full Role 5 serving suite: **25/25 passed**;
 - the six parity cases through `TestClient` against
-  `models:/fraud-detector@production`: **6/6 exact**, `max |delta| = 0.0`;
+  `models:/fraud-detector@production` (legacy v1): **6/6 exact**, `max |delta| = 0.0`;
 - `/model-info`: model `fraud-detector` v1, 6 contract + 4 derived features;
 - `/viz/{pca,tsne,umap}`: HTTP 200, 2,000 points each.
 
@@ -227,28 +230,41 @@ Phase 9.
 
 ### 6.2 Register the champion
 
-From the training branch, with the team URI:
+From the training branch, with the team URI. The statistics JSON must exist
+first (the conformal command fails fast if it is missing):
 
 ```bash
+python -m ml.training.scripts.run_statistics   # writes results/statistical_validation.json
 python -m ml.training.scripts.run_conformal \
   --model xgb --confidence 0.99 --r5 500000 --r5-alt 324610 \
   --log-mlflow --mlflow-tracking-uri http://<team-mlflow>:5000
 ```
 
+Use `--statistics-json <path>` if the gate file lives elsewhere.
+
 This logs the pipeline at artifact path `model`, the companion
-`uncertainty_config.json` at the run root, the required metrics and tags, and
-promotes the version to `@production`. Verify:
+`uncertainty_config.json` at the run root, `statistical_validation.json`, the
+required metrics and tags, and promotes the version to **`@candidate`**.
+The MLOps gate (`validate_gate.py` + `promote_model.py`) owns the promotion to
+`@staging`/`@production`. Verify:
 
 ```python
 from mlflow.tracking import MlflowClient
 client = MlflowClient("http://<team-mlflow>:5000")
-mv = client.get_model_version_by_alias("fraud-detector", "production")
+mv = client.get_model_version_by_alias("fraud-detector", "candidate")
 print(mv.version, mv.run_id)
 ```
 
 Required logged metrics: `roc_auc`, `pr_auc`, `f1`, `precision`, `recall`,
 `mcc`, `brier_score`, `expected_review_rate`, `inference_p95_ms`.
-Required tags: `algorithm`, `dataset_version`, `git_sha`, `seed`.
+Required tags: `algorithm`, `dataset_version`, `data_source`, `git_sha`, `seed`, `uncertainty_config_sha256`.
+
+- `data_source` is always `paysim`.
+- `uncertainty_config_sha256` is the SHA-256 of the exact
+  `uncertainty_config.json` bytes logged in the run. Serving can hash the
+  downloaded artifact and compare it to the tag (atomic coupling).
+- `statistical_validation.json` is logged at the run root and contains the
+  Friedman p-value plus the Wilcoxon/Holm pairs; the promotion gate consumes it.
 
 ### 6.3 Serving environment
 
@@ -256,7 +272,7 @@ Required tags: `algorithm`, `dataset_version`, `git_sha`, `seed`.
 |---|---|
 | `MLFLOW_TRACKING_URI` | team server URI |
 | `MODEL_NAME` | `fraud-detector` |
-| `MODEL_ALIAS` | `production` |
+| `MODEL_ALIAS` | `production` after promotion; `candidate` for pre-promotion parity |
 | `VIZ_DATA_DIR` | `/app/ml/visualization/data` (or mounted path) |
 | `STARTUP_LOAD_ENABLED` | `true` |
 
@@ -270,7 +286,8 @@ then the parity fixture.
 ├── model/                     # MLflow sklearn model (cloudpickle)
 │   ├── MLmodel
 │   └── ...
-└── uncertainty_config.json    # companion config at the run root
+├── uncertainty_config.json    # companion config at the run root
+└── statistical_validation.json # gate artifact (friedman/wilcoxon/holm)
 ```
 
 Do not move `uncertainty_config.json` under `model/`; the Role 5 loader
@@ -341,7 +358,7 @@ endpoint downsample.
 
 ## 9. What Role 4 needs back to start Phase 9
 
-1. Team MLflow URI and confirmation that `fraud-detector@production` resolves.
+1. Team MLflow URI and confirmation that `fraud-detector@production` resolves (or `@candidate` before the gate runs).
 2. A reachable FastAPI endpoint (local Docker is enough for the first smoke)
    with `/health/ready` returning 200 and `/model-info` showing model vN.
 3. Confirmation that the six parity cases pass in the Role 5 environment.
@@ -366,7 +383,8 @@ Until (1)–(3), Role 4 will not claim the serving integration is complete.
 | `/model-info` | model v1, 6 contract + 4 derived features |
 | `/viz/{method}` | 200, 2,000 points each |
 | MLflow required metrics/tags | none missing |
-| Local registry | `fraud-detector` v1 `@production`, run `ba69a008b819403dac7fca0867317922` |
+| Local registry | legacy `fraud-detector` v1 `@production`, run `ba69a008b819403dac7fca0867317922` (pre-candidate flow) |
+| Candidate flow (temp registry) | `fraud-detector` v1 **`@candidate`**, run `9a6842f5a4fd4d8981aa796679f5072d`; tags `data_source=paysim`, `uncertainty_config_sha256`; hash matches the downloaded artifact; `statistical_validation.json` logged |
 | Branch | `feat/role4-paysim-ml-setup` @ `7fe90f4` (code `17bd5c8`; main merged) |
 
 The serving-suite runs used temporary worktrees of `origin/feat/role5-mlops`

@@ -223,8 +223,14 @@ and the FastAPI service**; Role 4 logs the champion, verifies the alias, and
 runs parity. V2.2 §2.2 says “ML Serving + DevOps/MLOps”, so a shared split is
 acceptable — but one person must own the server checklist.
 
+**Promotion flow (Role 5 requirement, implemented):** training logs
+`fraud-detector@candidate` with tags `data_source=paysim` and
+`uncertainty_config_sha256`; `validate_gate.py` + `promote_model.py` promote
+to `@staging` then `@production`. Training also logs
+`statistical_validation.json` (Friedman + Wilcoxon/Holm) for the gate.
+
 **Minimum setup:** tracking URI, Postgres backend, MinIO/S3 artifact root,
-`sqlalchemy==2.0.36`, `fraud-detector@production`, serving env
+`sqlalchemy==2.0.36`, candidate/staging/production aliases, serving env
 `MLFLOW_TRACKING_URI`/`MODEL_NAME`/`MODEL_ALIAS`.
 
 **Impact:** until this exists, Role 4's local `mlruns/` is only a smoke-test
@@ -382,7 +388,10 @@ serving CI; no retrain if the revert wins.
 | Reason labels | `fintech_decisions_total{reason}`; alert only on `MODEL_UNCERTAIN` |
 | Robustness | Temporal + destination-disjoint; all frauds caught in both |
 | Features | Six contract fields + four derived; 10 raw / 14 transformed |
-| Serving artifact | `models:/fraud-detector@production` + `uncertainty_config.json` |
+| Serving artifact | `models:/fraud-detector@production` (after promotion) + `uncertainty_config.json` |
+| MLOps promotion | training logs `@candidate`; gate promotes `@staging` → `@production` |
+| MLflow tags | `data_source=paysim`, `uncertainty_config_sha256` |
+| Gate artifact | `statistical_validation.json` logged with the conformal run |
 | Viz | 2,000 points per method, OpenAPI `EmbeddingVizResponse` shape |
 
 ---

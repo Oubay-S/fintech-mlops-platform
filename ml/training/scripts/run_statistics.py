@@ -12,10 +12,15 @@ seed) and runs, per population × protocol × metric:
 Run after the benchmark:
 
     python -m ml.training.scripts.run_statistics
+
+The Markdown report is for humans; ``statistical_validation.json`` is the
+machine-readable artifact consumed by the MLOps promotion gate and logged by
+``run_conformal.py --log-mlflow``.
 """
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +31,7 @@ from ml.common.paths import ML_DIR, REPO_ROOT
 
 DEFAULT_RESULTS = ML_DIR / "training" / "results" / "benchmark_runs.csv"
 DEFAULT_REPORT = ML_DIR / "training" / "docs" / "statistical_validation.md"
+DEFAULT_JSON = ML_DIR / "training" / "results" / "statistical_validation.json"
 MODEL_ORDER = ["lr", "rf", "xgb", "svm", "mlp"]
 METRIC_LABELS = {
     "pr_auc": "PR-AUC",
@@ -181,10 +187,30 @@ def write_report(findings: list[dict], path: Path) -> None:
     path.write_text("\n".join(lines))
 
 
+def write_json(
+    findings: list[dict],
+    path: Path,
+    *,
+    results_path: Path,
+    metrics: list[str],
+) -> Path:
+    """Machine-readable statistical validation for the MLOps gate."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": "1.0",
+        "results_csv": str(results_path),
+        "metrics": metrics,
+        "findings": findings,
+    }
+    path.write_text(json.dumps(payload, indent=2))
+    return path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results", default=str(DEFAULT_RESULTS))
     parser.add_argument("--report", default=str(DEFAULT_REPORT))
+    parser.add_argument("--json", default=str(DEFAULT_JSON))
     parser.add_argument("--metrics", default="pr_auc,hard_recall,consistent_hard_recall,f1")
     args = parser.parse_args()
 
@@ -194,8 +220,15 @@ def main() -> None:
     if not findings:
         raise SystemExit("No complete paired blocks found; run the benchmark first.")
     write_report(findings, resolve(args.report))
+    json_path = write_json(
+        findings,
+        resolve(args.json),
+        results_path=resolve(args.results),
+        metrics=metrics,
+    )
     print(f"Findings: {len(findings)}")
     print(f"Report:   {resolve(args.report)}")
+    print(f"JSON:     {json_path}")
 
 
 if __name__ == "__main__":
