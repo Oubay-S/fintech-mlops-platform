@@ -7,14 +7,12 @@
 the same issues remain?
 
 **Short answer:** some decisions moved forward — R5 500k, `CASH_OUT`,
-scale, and reason labels are now documented. But **three new/remaining
+scale, and reason labels are now documented. But **two new/remaining
 blockers** appeared:
 
 1. the new `docs/conventions.md` §4 defines a **different `/predict` contract**
    from V2.2 §17.1/17.2 and the OpenAPI;
-2. the current Role 5 branch changed the model to **11 features / 2 types**,
-   contradicting V2.2 and the new conventions (all five types);
-3. amount serialization and `request_id` are still contradictory.
+2. amount serialization and `request_id` are still contradictory.
 
 ---
 
@@ -23,7 +21,7 @@ blockers** appeared:
 | Branch | Head | Change |
 |---|---|---|
 | `origin/main` | `136bc99` | V2.1 → **V2.2** committed; `docs/conventions.md` rewritten as “V2.2 aligned” |
-| `origin/feat/role5-mlops` | `3734d93` | Merge of main; includes `22d179a` — **11-feature / 2-type** serving change |
+| `origin/feat/role5-mlops` | `3734d93` | Merge of main (contract/preprocessing unchanged by the merge) |
 | `feat/role4-paysim-ml-setup` | `7fe90f4` | Merged `origin/main`; now contains V2.2 + new conventions; tests still 31/31 |
 
 The committed V2.2 is byte-identical to the root V2.2
@@ -45,7 +43,6 @@ beyond what Role 4 already audited. The new content is the rewritten
 | **Response shape** | Nested: `schema_version`, `action`, `fraud_probability`, `uncertainty{…}`, `model{}`, `explanations[]`, `inference_ms` | Flat: `transaction_id`, `prediction`, `prediction_set`, `uncertainty{is_uncertain,score}`, `model_version`, `explanations{attribution,description}` | Nested, same as V2.2 | nested; E2E matches OpenAPI | **New conflict — conventions diverges from V2.2/OpenAPI** |
 | **Model name** | `fraud-xgb` | `fraud-detector-v1.0` | `fraud-detector` | `fraud-detector` | **Still inconsistent; conventions leans correct** |
 | **Uncertainty formula** | “definition owned by ML Serving” | No formula | `score` + `prediction_set` only | normalized entropy; empty-set floor 0.85; threshold 0.50 | **Still undefined in team docs** |
-| **Transaction types** | §17.1: all five accepted; app sends two | §4: model trained on all five; app sends two | **role5 `22d179a`: only TRANSFER/CASH_OUT, 11 features** | 14 features / five categories | **New critical conflict** |
 | **`CASH_OUT`** | Core | Core MUST | Core | in-scope | **Resolved** |
 | **Scale / balances** | 1,000,000 initial; 10,000,000 max; R5 500k | Same | — | same | **Resolved** |
 | **Reason labels / alert** | §22.2 describes the problem | §6 adds `reason`; alert on `MODEL_UNCERTAIN` only | serving already exposes finite reasons | report splits R4/R5 | **Resolved** |
@@ -55,7 +52,7 @@ beyond what Role 4 already audited. The new content is the rewritten
 
 ---
 
-## 3. The three blockers in detail
+## 3. The two blockers in detail
 
 ### Blocker A — `/predict` contract: conventions vs V2.2/OpenAPI
 
@@ -103,48 +100,7 @@ a rewrite is needed if conventions wins.
 
 ---
 
-### Blocker B — 11 vs 14 features (2 types vs 5 types)
-
-Role 5 commit `22d179a` changed:
-
-```python
-TRANSACTION_TYPES = ["CASH_OUT", "TRANSFER"]   # 2 categories -> 11 transformed columns
-```
-
-and restricted `TransactionType` to two values. V2.2 §17.1 says ML Serving
-**accepts all five** types; the new conventions says the model is **trained on
-all 5** types (only app traffic is limited to two). Role 4's served model is trained on the app-valid two types, but the
-encoder is pinned to **five categories**, so the signature is **14 features**
-(9 numeric + 5 one-hot) and it can score all five.
-
-Evidence: with Role 4's 14-feature `ml/common` overlaid on the current Role 5
-branch, **23/25** serving tests pass; the two failures are exactly the parity
-tests that assert 11 columns:
-
-```
-assert transformed.shape == (len(rows), 11)
-E  assert (5, 14) == (5, 11)
-```
-
-The earlier “25/25” result was on the **pre-`22d179a`** Role 5 branch (14
-features). It is no longer true for the current head.
-
-**Decision required:** either
-
-- **revert Role 5 to five categories / 14 features** (matches V2.2, the new
-  conventions, and the delivered model) — recommended; or
-- formally move to an 11-feature model: retrain/conformal/repackage on two
-  categories, update V2.2 §17.1, the OpenAPI enum, and the parity fixture.
-
-**Owner:** Role 5 + Role 4. **Impact:** without this, merging `ml/common`
-breaks CI and the model loader.
-
-**Status 1 Nov:** Role 5 confirmed the revert to 14 features; pending the
-branch push.
-
----
-
-### Blocker C — amount type and request ID still unresolved
+### Blocker B — amount type and request ID still unresolved
 
 - V2.2 §11.1: amounts are **strings** in JSON; §17.1/OpenAPI/conventions use
   **numbers**. The contradiction persists, and conventions now silently picks
@@ -188,19 +144,16 @@ boundary in V2.2 §11.1/§17.2 and conventions §4.
 
 ## 6. Recommended actions
 
-1. **Role 5:** revert `TRANSACTION_TYPES` to the five categories (14 features)
-   or open a formal change request for 11 features. Do not merge `ml/common`
-   until this is settled.
-2. **Backend + Role 5:** rewrite `docs/conventions.md` §4 to the V2.2/OpenAPI
+1. **Backend + Role 5:** rewrite `docs/conventions.md` §4 to the V2.2/OpenAPI
    nested request/response; keep `request_id`, add it to the response.
-3. **Team:** pick `request_id` (recommended) vs `transaction_id`; pick string
+2. **Team:** pick `request_id` (recommended) vs `transaction_id`; pick string
    vs number at the public boundary; update V2.2 §11.1/§17.2 and OpenAPI
    together.
-4. **Role 3 + Role 5:** name the MLflow server owner explicitly. V2.2 says
+3. **Role 3 + Role 5:** name the MLflow server owner explicitly. V2.2 says
    shared “ML Serving + DevOps”; conventions says Role 3. Role 4's handoff
    needs a single owner for the server checklist.
-5. **Role 4:** after (1) is resolved, rerun the serving suite and the six parity
-   cases against the team stack; update the handoff verification log.
+4. **Role 4:** once the contract and team MLflow are settled, rerun the serving
+   suite and the six parity cases; update the handoff verification log.
 
 ---
 
@@ -210,9 +163,7 @@ boundary in V2.2 §11.1/§17.2 and conventions §4.
 git fetch --all --prune
 git log --oneline origin/main -3
 git diff origin/main...origin/feat/role4-paysim-ml-setup
-git show origin/feat/role5-mlops:ml/common/schema.py | grep TRANSACTION_TYPES
-git show origin/feat/role5-mlops:ml/serving/tests/test_feature_parity.py | grep "shape =="
-# temporary worktree with Role 4's ml/common overlaid:
-pytest ml/serving/tests -q
-# -> 23 passed, 2 failed (11 vs 14 feature parity)
+diff <(git show origin/main:docs/conventions.md) docs/conventions.md
+# contract comparison: V2.2 §17.1/17.2 vs conventions §4 vs OpenAPI
+pytest ml/ -q   # Role 4 suite remains green
 ```
