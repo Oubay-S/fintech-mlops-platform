@@ -23,10 +23,13 @@ class UnsupportedSchemaVersionError(ValueError):
 
 
 class TransactionType(str, Enum):
-    """In-scope PaySim transaction types supported by the application and ML model."""
+    """PaySim transaction types (14 transformed features signature)."""
 
     TRANSFER = "TRANSFER"
     CASH_OUT = "CASH_OUT"
+    PAYMENT = "PAYMENT"
+    CASH_IN = "CASH_IN"
+    DEBIT = "DEBIT"
 
 
 class PredictionLabel(str, Enum):

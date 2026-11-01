@@ -70,10 +70,10 @@ def build_preprocessor() -> ColumnTransformer:
     """The single preprocessing object used by training and serving.
 
     - numeric contract fields + derived features: StandardScaler (9 features)
-    - ``type``: one-hot encoding with the 2 in-scope PaySim categories (`CASH_OUT`, `TRANSFER`)
+    - ``type``: one-hot encoding with explicit 5 PaySim categories
 
     Scaling is harmless for tree models and required for LR/SVM/MLP, so one
-    transformation keeps the benchmark fair and the serving path identical (11 features total).
+    transformation keeps the benchmark fair and the serving path identical (14 features total).
     """
     return ColumnTransformer(
         transformers=[

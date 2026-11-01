@@ -4,8 +4,7 @@ This module defines the single canonical contract for:
 1. Experiment naming and required run tags.
 2. Required logged evaluation metrics.
 3. Artifact layout inside an MLflow run (`model/` + `uncertainty_config.json`).
-4. Expected 11-column transformed feature signature after `build_preprocessor()`
-   (9 numeric features + `type_CASH_OUT` + `type_TRANSFER`).
+4. Expected 14-column transformed feature signature after `build_preprocessor()`.
 """
 from __future__ import annotations
 
@@ -31,7 +30,7 @@ STAGING_ALIAS = "staging"
 MODEL_ARTIFACT_PATH = "model"
 UNCERTAINTY_CONFIG_ARTIFACT = "uncertainty_config.json"
 
-# Expected 11 transformed feature names out of `build_preprocessor()` (9 numeric + 2 one-hot)
+# Expected 14 transformed feature names out of `build_preprocessor()` (9 numeric + 5 one-hot)
 EXPECTED_TRANSFORMED_FEATURES: list[str] = list(NUMERIC_FEATURES) + [
     f"type_{t}" for t in TRANSACTION_TYPES
 ]
