@@ -1,6 +1,6 @@
 # Model Card — `fraud-detector`
 
-**Generated:** 2026-11-01T00:34:28.737312+00:00 · **Owner:** ML Training (Role 4)
+**Generated:** 2026-11-01T00:37:33.252757+00:00 · **Owner:** ML Training (Role 4)
 **Algorithm:** XGBClassifier · **Contract:** feature list v1.2
 **Conformal:** mondrian_conformal, 99% confidence
 **R5 threshold:** 500,000

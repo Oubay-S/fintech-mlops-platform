@@ -154,6 +154,11 @@ class UncertaintyConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "UncertaintyConfig":
+        def _metric(value: Any) -> Any:
+            if value is None or isinstance(value, (bool, int, float)):
+                return value
+            return float(value)
+
         config = cls(
             method=str(data.get("method", "split_conformal")),
             confidence_level=float(data.get("confidence_level", 0.95)),
@@ -172,7 +177,7 @@ class UncertaintyConfig:
                 data.get("transformed_feature_names", EXPECTED_TRANSFORMED_FEATURES)
             ),
             metrics_summary={
-                str(key): float(value)
+                str(key): _metric(value)
                 for key, value in data.get("metrics_summary", {}).items()
             },
             schema_version=str(data.get("schema_version", ARTIFACT_SCHEMA_VERSION)),

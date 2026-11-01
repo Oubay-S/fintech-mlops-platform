@@ -104,3 +104,19 @@ def test_example_config_loads() -> None:
     assert config.confidence_level == 0.99
     assert config.eval_population.startswith("app-valid TRANSFER+CASH_OUT")
     assert len(config.model_feature_names) >= 10
+
+
+def test_metrics_summary_preserves_numeric_types() -> None:
+    payload = _config().to_dict()
+    payload["metrics_summary"] = {
+        "rows": 10,
+        "review_rate": 0.0132,
+        "flag": True,
+        "missing": None,
+    }
+    restored = UncertaintyConfig.from_dict(payload)
+    assert restored.metrics_summary["rows"] == 10
+    assert isinstance(restored.metrics_summary["rows"], int)
+    assert isinstance(restored.metrics_summary["review_rate"], float)
+    assert restored.metrics_summary["flag"] is True
+    assert restored.metrics_summary["missing"] is None
