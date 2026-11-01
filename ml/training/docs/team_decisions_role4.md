@@ -13,20 +13,27 @@ does not bounce.
 
 ## 0. One-page summary
 
-| ID | Decision | Owner | Recommendation | Priority |
-|---|---|---|---|---|
-| D1 | R5 high-amount threshold | Backend/Risk + Role 4 | **500,000** for the demo | **P0** |
-| D2 | Full-drain product policy | Backend/Product + Risk | Keep R3 reject + document; review the UX before real users | **P0** |
-| D3 | Amount serialization | Backend + Role 5 | Public API strings; `/predict` numbers (float64) | **P0** |
-| D4 | `request_id` in `/predict` response | Role 5 + Backend | Echo it | **P0** |
-| D5 | Model name | Team | `fraud-detector` (not `fraud-xgb`) | P1 |
-| D6 | Uncertainty-score ownership/formula | Role 4 + Role 5 | Role 4 owns formula/q-hats; Role 5 serializes | P1 |
-| D7 | MLflow server/registry ownership | Role 5 + Role 3 | Role 5 owns the registry; Role 3 the infra | P1 |
-| D8 | `CASH_OUT` / accepted type set | Backend | Accept all five; app sends TRANSFER + CASH_OUT | P1 |
-| D9 | App-valid definition / monetary scale | Backend + Role 4 | Confirm 1M / 10M / `available >= amount` | P1 |
-| D10 | Decision reasons / uncertainty alert | Backend + DevOps + Role 4 | Add `reason`; alert only on `MODEL_UNCERTAIN` | P2 |
-| D11 | Viz point count | Role 4 + Role 5 | 2,000 for the demo; regenerate 5–10k later if needed | P2 |
-| D12 | Audit fields / feature-freeze date | Backend + Role 4 | Store config hash; freeze 20 Dec | P2 |
+| ID | Decision | Owner | Recommendation | Priority | Team-doc status (1 Nov) |
+|---|---|---|---|---|---|
+| D1 | R5 high-amount threshold | Backend/Risk + Role 4 | **500,000** for the demo | **P0** | Documented as provisional; formal sign-off open |
+| D2 | Full-drain product policy | Backend/Product + Risk | Keep R3 reject + document; review the UX before real users | **P0** | Still open |
+| D3 | Amount serialization | Backend + Role 5 | Public API strings; `/predict` numbers (float64) | **P0** | Still contradictory |
+| D4 | `request_id` / `transaction_id` | Role 5 + Backend | Use `request_id`; echo it | **P0** | Still open; conventions uses `transaction_id` |
+| D5 | Model name | Team | `fraud-detector` (not `fraud-xgb`) | P1 | Conventions uses `fraud-detector-v1.0`; V2.2 still `fraud-xgb` |
+| D6 | Uncertainty-score ownership/formula | Role 4 + Role 5 | Role 4 owns formula/q-hats; Role 5 serializes | P1 | Still undefined in team docs |
+| D7 | MLflow server/registry ownership | Role 3 + Role 5 | Role 3 hosts the server; Role 5 registers/loads | P1 | V2.2 says shared; conventions says Role 3 |
+| D8 | `CASH_OUT` / accepted type set | Backend | Accept all five; app sends TRANSFER + CASH_OUT | P1 | ✅ Resolved (core MUST) |
+| D9 | App-valid definition / monetary scale | Backend + Role 4 | Confirm 1M / 10M / `available >= amount` | P1 | ✅ Scale resolved; filter confirmation open |
+| D10 | Decision reasons / uncertainty alert | Backend + DevOps + Role 4 | Add `reason`; alert only on `MODEL_UNCERTAIN` | P2 | ✅ Resolved (conventions §6) |
+| D11 | Viz point count | Role 4 + Role 5 | 2,000 for the demo; regenerate 5–10k later if needed | P2 | Still open |
+| D12 | Audit fields / feature-freeze date | Backend + Role 4 | Store config hash; freeze 20 Dec | P2 | Still open (V2.2 still says 25 Oct) |
+| **D13** | **`/predict` request/response shape** | **Backend + Role 5** | **Use V2.2 §17.1/17.2 + OpenAPI; rewrite conventions §4** | **P0** | **New conflict** |
+| **D14** | **11 vs 14 transformed features** | **Role 5 + Role 4** | **Revert role5 to five categories (14)** | **P0** | **New critical conflict** |
+
+> **New since the 1 Nov pull:** D13 and D14 are blocking. The main-branch
+> V2.2 is byte-identical to the version Role 4 already audited; the rewritten
+> `docs/conventions.md` introduced D13, and role5 commit `22d179a` introduced
+> D14. See `TEAM_DOCS_DRIFT_REPORT.md` for the full evidence.
 
 ---
 
@@ -53,6 +60,10 @@ does not bounce.
 **Recommendation:** keep **500,000** for the demo (1.322% review), and revisit
 after the first load test if the analyst queue is under-used. If product wants
 the queue exercised more, 324,610 is the documented alternative.
+
+**Team-doc status (1 Nov):** V2.2 and `docs/conventions.md` now both document
+500,000 as the provisional default, so the implementation default is settled;
+the formal “validated” sign-off is still open.
 
 **Impact if changed:** only the R5 config value and the expected review share;
 no retrain. Role 5 reads the value from `uncertainty_config.json` or the Risk
@@ -90,6 +101,10 @@ ML exception without data.
 **Owner:** Backend/Product + Risk. **Role 4 impact:** none for the demo; option
 2 changes only the decision policy, not the model.
 
+**Team-doc status (1 Nov):** `docs/conventions.md` §8 repeats the demo trigger
+(whole balance → `REJECTED`); it still does not decide the legitimate-user UX.
+The issue is unchanged.
+
 ---
 
 ### D3. Amount serialization: string or number?
@@ -118,6 +133,10 @@ wallet edge. Document the boundary in the conception and OpenAPI.
 **Owner:** Backend + Role 5. **Role 4 impact:** none (the model consumes
 numbers).
 
+**Team-doc status (1 Nov):** `docs/conventions.md` §4 now uses numbers, which
+**contradicts V2.2 §11.1 (strings)**. The contradiction is now explicit in two
+team documents, not resolved.
+
 ---
 
 ### D4. `request_id` in the `/predict` response
@@ -136,6 +155,11 @@ the review queue.
 
 **Owner:** Role 5 + Backend. **Role 4 impact:** none.
 
+**Team-doc status (1 Nov):** V2.2 still omits the response ID; the new
+conventions uses `transaction_id` in both request and response; the OpenAPI
+uses `request_id`. Three names/shapes now exist. Pick `request_id` and update
+all three.
+
 ---
 
 ## P1 — settle during integration
@@ -150,6 +174,10 @@ the registry and serving config. Update the V2.2 example.
 
 **Owner:** Team. **Impact:** a rename touches the registry, `MODEL_NAME` env,
 OpenAPI examples, and the model-info response.
+
+**Team-doc status (1 Nov):** conventions uses `fraud-detector-v1.0`; V2.2 still
+says `fraud-xgb`; OpenAPI and the registry use `fraud-detector`. The direction
+is clear, but V2.2 is still stale.
 
 ---
 
@@ -178,6 +206,10 @@ formula and the 0.85 empty-set floor in the OpenAPI/conventions.
 **Owner:** Role 4 + Role 5. **Impact:** if the formula changes, the package
 fixture and the dashboards change; the model does not.
 
+**Team-doc status (1 Nov):** V2.2 still says ML Serving owns the definition;
+conventions adds `uncertainty.is_uncertain`/`score` but no formula. The team
+docs still do not define the scalar; Role 4's artifact does.
+
 ---
 
 ### D7. MLflow server and registry ownership
@@ -185,10 +217,11 @@ fixture and the dashboards change; the model does not.
 **Question:** who runs the shared MLflow tracking server, backend store,
 artifact store, and `@production` alias?
 
-**Recommendation:** **Role 5 owns the MLflow server/registry** (MLOps scope),
-with **Role 3** providing Postgres/MinIO/K8s/network/secrets. Role 4 logs the
-champion from the training branch and verifies the alias and parity; Role 4 does
-not operate the server.
+**Recommendation:** **Role 3 hosts the MLflow server** (Postgres + S3 + K8s,
+matching `docs/conventions.md` §1); **Role 5 owns model registration/loading
+and the FastAPI service**; Role 4 logs the champion, verifies the alias, and
+runs parity. V2.2 §2.2 says “ML Serving + DevOps/MLOps”, so a shared split is
+acceptable — but one person must own the server checklist.
 
 **Minimum setup:** tracking URI, Postgres backend, MinIO/S3 artifact root,
 `sqlalchemy==2.0.36`, `fraud-detector@production`, serving env
@@ -216,6 +249,11 @@ demo** so the TRANSFER-only numbers replace the two-type numbers.
 **Owner:** Backend. **Impact:** potentially a full re-run of the benchmark,
 conformal, and robustness reports.
 
+**Team-doc status (1 Nov):** **resolved** — `docs/conventions.md` §3 makes
+`TRANSFER` and `CASH_OUT` core MUST; V2.2 §17.1 says the API accepts all five.
+Keep the API at five types and the app at two. (Role 5's current 2-type enum
+is D14, not this decision.)
+
 ---
 
 ### D9. App-valid definition and monetary scale
@@ -231,6 +269,11 @@ conformal, and robustness reports.
 and that holds/limits are included in `sender_old_balance`. If the app's
 "available" differs from `oldbalanceOrg`, the serving population changes and
 the calibration prior must be revisited.
+
+**Team-doc status (1 Nov):** the scale (1,000,000 / 10,000,000 / 500,000) is
+now documented identically in V2.2 §11.2 and conventions §3 — **resolved**.
+Only the exact `available` definition/validation order needs backend
+confirmation.
 
 **Owner:** Backend + Role 4.
 
@@ -252,6 +295,10 @@ Role 5's `ml_human_review_requests_total{reason}`) and alert only on
 `MODEL_UNCERTAIN`/`SERVICE_DEGRADED`.
 
 **Owner:** Backend + DevOps + Role 4 (validation).
+
+**Team-doc status (1 Nov):** **resolved** — conventions §6 adds the `reason`
+label and restricts the uncertainty alert to `MODEL_UNCERTAIN`. Backend/DevOps
+only need to implement it.
 
 ### D11. Viz point count
 
@@ -275,6 +322,51 @@ freeze 20 Dec).
 
 ---
 
+## New blockers from the 1 Nov pull
+
+### D13. `/predict` request/response shape: conventions vs V2.2/OpenAPI
+
+**Question:** which contract is normative?
+
+**Evidence:** the new `docs/conventions.md` §4 defines a **flat** request
+(`transaction_id` + six fields) and a **flat** response
+(`prediction`, `prediction_set`, `model_version`, `explanations.attribution`).
+V2.2 §17.1/17.2 and the OpenAPI define a **nested** request
+(`schema_version`, `request_id`, `features{}`) and a **nested** response
+(`action`, `uncertainty{}`, `model{}`, `explanations.contribution`,
+`inference_ms`).
+
+**Recommendation:** keep **V2.2 + OpenAPI** as normative (that is what Role 5
+implements and what the parity fixture tests) and rewrite conventions §4 to
+match. Do not build Risk against the conventions' flat shape.
+
+**Owner:** Backend + Role 5. **Impact:** a contract rewrite, not a model change.
+
+---
+
+### D14. 11 vs 14 transformed features
+
+**Question:** does the served model accept five types (14 features) or only
+TRANSFER/CASH_OUT (11 features)?
+
+**Evidence:** Role 5 commit `22d179a` set
+`TRANSACTION_TYPES = ["CASH_OUT", "TRANSFER"]` and restricted the API enum to
+two values. V2.2 §17.1 says ML Serving **accepts all five**; the new
+conventions says the model is **trained on all five**. Role 4's model is
+**14 features**. With Role 4's `ml/common` overlaid on the current Role 5
+branch, **23/25** serving tests pass; the two failures assert 11 columns
+(`(5, 14) != (5, 11)`).
+
+**Recommendation:** **revert Role 5 to five categories / 14 features.** It
+matches V2.2, the conventions, the delivered model, and the parity fixture.
+If the team truly wants 11 features, Role 4 must retrain/recalibrate/repack
+and V2.2 §17.1, the OpenAPI enum, and the fixture must change together.
+
+**Owner:** Role 5 + Role 4. **Impact:** blocks merging `ml/common` and the
+serving CI; no retrain if the revert wins.
+
+---
+
 ## Already settled (no action needed)
 
 | Item | Decision |
@@ -283,6 +375,10 @@ freeze 20 Dec).
 | Served model | XGBoost, contract protocol, serving-consistent balances |
 | Conformal | Mondrian 99%, `q_hat_fraud`/`q_hat_legit` in the artifact |
 | Decision policy | R3 reject `{fraud}`, R4 review empty/both, R5 review `{legit}` + amount ≥ threshold, R6 approve |
+| R5 default | 500,000 provisional, documented in V2.2 and conventions |
+| `CASH_OUT` | Core MUST; app sends TRANSFER + CASH_OUT; API accepts all five (pending D14) |
+| Monetary scale | 1,000,000 initial / 10,000,000 max / 500,000 R5 |
+| Reason labels | `fintech_decisions_total{reason}`; alert only on `MODEL_UNCERTAIN` |
 | Robustness | Temporal + destination-disjoint; all frauds caught in both |
 | Features | Six contract fields + four derived; 10 raw / 14 transformed |
 | Serving artifact | `models:/fraud-detector@production` + `uncertainty_config.json` |

@@ -1,7 +1,7 @@
 # Serving Handoff — Role 4 → Role 5
 
 **Status:** Ready for integration · **Date:** 1 November 2026
-**Source branch:** `feat/role4-paysim-ml-setup` @ `17bd5c8`
+**Source branch:** `feat/role4-paysim-ml-setup` @ `7fe90f4` (main merged; code state `17bd5c8`)
 **Author / owner:** ML Training (Role 4) · **Consumer:** ML Serving (Role 5), DevOps (Role 3)
 **Companion:** `TEAM_DECISIONS_ROLE4.md` (open product/contract decisions)
 
@@ -27,6 +27,12 @@ load tests.
 
 Both are already pinned in `ml/requirements.txt` on this branch.
 
+**Do not merge Role 5's current `ml/common` yet.** The current Role 5 branch
+(`3734d93`, commit `22d179a`) changed to **2 transaction types / 11 features**,
+while V2.2, the new conventions, and this model use **5 types / 14 features**.
+The unmodified current serving suite fails 2 parity tests against this model
+(23/25 pass). See §1.5 and `TEAM_DOCS_DRIFT_REPORT.md`.
+
 ---
 
 ## 1. Ownership boundary
@@ -35,14 +41,53 @@ Both are already pinned in `ml/requirements.txt` on this branch.
 |---|---|---|
 | Trained pipeline, preprocessing, conformal config, metrics, feature list, model card, parity fixture, viz JSON | **Role 4** | Delivered in this branch / package |
 | FastAPI `/predict`, `/model-info`, `/viz`, health, serving-side conformal set, parity test | **Role 5** | Loads the artifact from MLflow |
-| MLflow tracking server, backend store, artifact store (MinIO/S3), registry, `@production` alias | **Role 5** | Role 3 provides Postgres/MinIO/K8s/network |
+| MLflow server, backend store, artifact store (MinIO/S3) | **Role 3** | `docs/conventions.md` §1; V2.2 §2.2 says “ML Serving + DevOps/MLOps” |
+| Model registration, `@production` alias, registry usage | **Role 5** (Role 4 supports) | Role 4 can re-log from the training branch |
 | Docker/K8s, HPA, monitoring, secrets | **Role 3** | Serving image is built by Role 5 |
-| Model registration in the **team** registry | **Role 5** (Role 4 supports) | Role 4 can re-log from the training branch |
 | Phase 9 load tests | **Role 4** | Needs a running endpoint + cluster access |
 
 The local `mlruns/` registry used during development is **not** the handoff
 registry. It exists only to prove the logging/alias/loading path. The team
 MLflow server is the source of truth.
+
+---
+
+## 1.5. Stop: two contract blockers before integration
+
+The 1 Nov pull of `origin/main` and `origin/feat/role5-mlops` exposed two
+blockers that are **not** Role 4 model bugs. Resolve them before merging
+`ml/common` or running the serving CI.
+
+### A. 11 vs 14 features
+
+- Role 5 commit `22d179a` sets `TRANSACTION_TYPES = ["CASH_OUT", "TRANSFER"]`
+  → **11** transformed columns and a 2-value `TransactionType` enum.
+- V2.2 §17.1 says ML Serving **accepts all five** types; the new
+  `docs/conventions.md` says the model is **trained on all five** (only app
+  traffic is limited to two).
+- Our served model is **14** columns (9 numeric + 5 one-hot).
+- With our `ml/common` overlaid on current Role 5, **23/25** serving tests pass;
+  the 2 failures assert 11 columns:
+  `assert (5, 14) == (5, 11)`.
+
+**Recommended fix:** revert Role 5 to five categories / 14 features. If the
+team prefers 11, Role 4 must retrain/recalibrate/repack and V2.2 §17.1, the
+OpenAPI enum, and the parity fixture must change together.
+
+### B. `docs/conventions.md` §4 is not the V2.2/OpenAPI contract
+
+The new conventions defines a flat request (`transaction_id` + six fields) and
+a flat response (`prediction`, `prediction_set`, `model_version`, ...).
+V2.2 §17.1/17.2 and the OpenAPI define the nested request
+(`schema_version`, `request_id`, `features{}`) and nested response
+(`action`, `uncertainty{}`, `model{}`, `explanations.contribution`,
+`inference_ms`). Role 5's FastAPI and our parity fixture follow V2.2/OpenAPI.
+
+**Recommended fix:** treat V2.2 + OpenAPI as normative and rewrite conventions
+§4. Do not build Risk against the flat shape.
+
+Both are tracked in `TEAM_DECISIONS_ROLE4.md` (D13/D14) and
+`TEAM_DOCS_DRIFT_REPORT.md`.
 
 ---
 
@@ -164,9 +209,12 @@ Role 5 should repeat it in its own environment after registration.
 
 ---
 
-## 6. MLflow / MLOps setup checklist (Role 5)
+## 6. MLflow / MLOps setup checklist (Role 3 hosts; Role 5 registers)
 
-Role 5 owns this; the list is the minimum needed for Role 4 to run Phase 9.
+`docs/conventions.md` assigns the MLflow server to Role 3; Role 5 owns model
+registration/loading and the FastAPI service. V2.2 §2.2 calls it shared
+“ML Serving + DevOps/MLOps”. The list is the minimum needed for Role 4 to run
+Phase 9.
 
 ### 6.1 Server and stores
 
@@ -250,8 +298,9 @@ Additional traps:
 
 - **Do not** re-fit the preprocessor on serving data. Load the fitted
   pipeline; `build_features` computes only deterministic derived columns.
-- **Do not** change the five one-hot categories. A 3-category encoder produces
-  11 columns and the loader rejects it.
+- **Do not** change the five one-hot categories. A 2-category encoder produces
+  11 columns; the current Role 5 branch does exactly that (D14). The model and
+  the loader require the 14-column signature.
 - **Do not** edit `uncertainty_config.json` by hand; regenerate it with
   `run_conformal`.
 - The MLflow model signature documents the **10 engineered inputs**, not the
@@ -311,17 +360,21 @@ Until (1)–(3), Role 4 will not claim the serving integration is complete.
 | Check | Result |
 |---|---|
 | Role 4 unit/integration tests | **31/31 passed** (`ml/.venv/bin/python -m pytest ml/ -q`) |
-| Role 5 serving suite (common overlaid) | **25/25 passed** |
-| Training→MLflow→FastAPI parity | **6/6 cases**, `max |delta| = 0.0` |
+| Role 5 serving suite, **pre-`22d179a`** (14-feature common) | **25/25 passed** |
+| Role 5 serving suite, **current** (`3734d93`, 11-feature tests) | **23/25 passed**; 2 expected failures: 11 vs 14 features |
+| Training→MLflow→FastAPI parity (14-feature common overlaid) | **6/6 cases**, `max |delta| = 0.0` |
 | `/model-info` | model v1, 6 contract + 4 derived features |
 | `/viz/{method}` | 200, 2,000 points each |
 | MLflow required metrics/tags | none missing |
 | Local registry | `fraud-detector` v1 `@production`, run `ba69a008b819403dac7fca0867317922` |
-| Branch | `feat/role4-paysim-ml-setup` @ `17bd5c8` |
+| Branch | `feat/role4-paysim-ml-setup` @ `7fe90f4` (code `17bd5c8`; main merged) |
 
-The serving-suite run used a temporary worktree of `origin/feat/role5-mlops`
-with Role 4's `ml/common/` copied in; it is not a substitute for Role 5's own
-CI, but it proves the shared modules and artifact are compatible.
+The serving-suite runs used temporary worktrees of `origin/feat/role5-mlops`
+with Role 4's `ml/common/` copied in. The 25/25 result is the **pre-`22d179a`**
+branch; the current branch is 23/25 because its tests assert 11 features. The
+E2E parity run also used the overlaid 14-feature common, so it proves the app
+can load this model once D14 is resolved — not that the current branch is
+already compatible.
 
 ---
 
