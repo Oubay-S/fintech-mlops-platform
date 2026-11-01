@@ -1,7 +1,7 @@
 # Serving Handoff — Role 4 → Role 5
 
 **Status:** Ready for integration · **Date:** 1 November 2026
-**Source branch:** `feat/role4-paysim-ml-setup` @ `6364b56`
+**Source branch:** `feat/role4-paysim-ml-setup` @ `17bd5c8`
 **Author / owner:** ML Training (Role 4) · **Consumer:** ML Serving (Role 5), DevOps (Role 3)
 **Companion:** `TEAM_DECISIONS_ROLE4.md` (open product/contract decisions)
 
@@ -317,7 +317,7 @@ Until (1)–(3), Role 4 will not claim the serving integration is complete.
 | `/viz/{method}` | 200, 2,000 points each |
 | MLflow required metrics/tags | none missing |
 | Local registry | `fraud-detector` v1 `@production`, run `ba69a008b819403dac7fca0867317922` |
-| Branch | `feat/role4-paysim-ml-setup` @ `6364b56` |
+| Branch | `feat/role4-paysim-ml-setup` @ `17bd5c8` |
 
 The serving-suite run used a temporary worktree of `origin/feat/role5-mlops`
 with Role 4's `ml/common/` copied in; it is not a substitute for Role 5's own
