@@ -28,12 +28,13 @@ does not bounce.
 | D11 | Viz point count | Role 4 + Role 5 | 2,000 for the demo; regenerate 5–10k later if needed | P2 | Still open |
 | D12 | Audit fields / feature-freeze date | Backend + Role 4 | Store config hash; freeze 20 Dec | P2 | Still open (V2.2 still says 25 Oct) |
 | **D13** | **`/predict` request/response shape** | **Backend + Role 5** | **Use V2.2 §17.1/17.2 + OpenAPI; rewrite conventions §4** | **P0** | **New conflict** |
-| **D14** | **11 vs 14 transformed features** | **Role 5 + Role 4** | **Revert role5 to five categories (14)** | **P0** | **New critical conflict** |
+| **D14** | **11 vs 14 transformed features** | **Role 5 + Role 4** | **Revert role5 to five categories (14)** | **Resolved** | Role 5 confirmed; pending branch push |
 
-> **New since the 1 Nov pull:** D13 and D14 are blocking. The main-branch
-> V2.2 is byte-identical to the version Role 4 already audited; the rewritten
-> `docs/conventions.md` introduced D13, and role5 commit `22d179a` introduced
-> D14. See `TEAM_DOCS_DRIFT_REPORT.md` for the full evidence.
+> **New since the 1 Nov pull:** D13 is blocking. D14 was introduced by role5
+> commit `22d179a`, but Role 5 confirmed the revert to 14 features (pending
+> push), so it is no longer a team decision. The main-branch V2.2 is
+> byte-identical to the version Role 4 already audited; the rewritten
+> `docs/conventions.md` introduced D13. See `TEAM_DOCS_DRIFT_REPORT.md`.
 
 ---
 
@@ -350,7 +351,7 @@ match. Do not build Risk against the conventions' flat shape.
 
 ---
 
-### D14. 11 vs 14 transformed features
+### D14. 11 vs 14 transformed features — resolved
 
 **Question:** does the served model accept five types (14 features) or only
 TRANSFER/CASH_OUT (11 features)?
@@ -387,7 +388,7 @@ parity cases.
 | Conformal | Mondrian 99%, `q_hat_fraud`/`q_hat_legit` in the artifact |
 | Decision policy | R3 reject `{fraud}`, R4 review empty/both, R5 review `{legit}` + amount ≥ threshold, R6 approve |
 | R5 default | 500,000 provisional, documented in V2.2 and conventions |
-| `CASH_OUT` | Core MUST; app sends TRANSFER + CASH_OUT; API accepts all five (pending D14) |
+| `CASH_OUT` | Core MUST; app sends TRANSFER + CASH_OUT; API accepts all five |
 | Monetary scale | 1,000,000 initial / 10,000,000 max / 500,000 R5 |
 | Reason labels | `fintech_decisions_total{reason}`; alert only on `MODEL_UNCERTAIN` |
 | Robustness | Temporal + destination-disjoint; all frauds caught in both |
