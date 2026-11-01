@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-31T23:42:52.314659+00:00",
+  "generated_at": "2026-11-01T00:34:28.737312+00:00",
   "model_path": "ml/data/processed/final_contract_model.joblib",
   "files": [
     "uncertainty_config.json",

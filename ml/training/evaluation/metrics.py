@@ -30,12 +30,20 @@ def metrics_at(y_true: np.ndarray, probs: np.ndarray, threshold: float = 0.5) ->
     return {
         "threshold": float(threshold),
         "accuracy": float(accuracy_score(y_true, predicted)),
-        "precision": float(precision_score(y_true, predicted, zero_division=0)),
-        "recall": float(recall_score(y_true, predicted, zero_division=0)),
-        "f1": float(f1_score(y_true, predicted, zero_division=0)),
+        "precision": float(
+            precision_score(y_true, predicted, labels=[0, 1], zero_division=0)
+        ),
+        "recall": float(
+            recall_score(y_true, predicted, labels=[0, 1], zero_division=0)
+        ),
+        "f1": float(f1_score(y_true, predicted, labels=[0, 1], zero_division=0)),
         "roc_auc": float(roc_auc_score(y_true, probs)) if has_both_classes else None,
         "pr_auc": float(average_precision_score(y_true, probs)) if has_both_classes else None,
-        "mcc": float(matthews_corrcoef(y_true, predicted)),
+        "mcc": (
+            float(matthews_corrcoef(y_true, predicted))
+            if len(np.unique(y_true)) > 1 and len(np.unique(predicted)) > 1
+            else 0.0
+        ),
         "brier": float(brier_score_loss(y_true, probs)),
         "predicted_positive_rate": float(predicted.mean()),
         "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},

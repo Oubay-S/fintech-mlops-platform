@@ -32,7 +32,6 @@ import pandas as pd
 from ml.common.artifact_contract import (
     UncertaintyConfig,
     prediction_set,
-    suggested_action,
 )
 from ml.common.paths import ML_DIR, REPO_ROOT
 from ml.common.preprocessing import build_features
@@ -131,14 +130,25 @@ def entropy_score(p_fraud: float) -> float:
 
 
 def expected_response(features: dict, pipeline, config: UncertaintyConfig) -> dict:
+    """Mirror ML Serving's ``_compute_conformal_set`` exactly (action + score)."""
     frame = pd.DataFrame([features])
     engineered = build_features(frame)
-    p = float(pipeline.predict_proba(engineered)[:, 1][0])
+    p = float(np.clip(pipeline.predict_proba(engineered)[:, 1][0], 0.0, 1.0))
     labels = prediction_set(p, config)
     score = entropy_score(p)
-    action = suggested_action(labels)
-    if action == "ALLOW" and score >= config.high_uncertainty_score_threshold:
+
+    if not labels:
         action = "HUMAN_REVIEW"
+        score = max(score, 0.85)  # serving floors empty-set uncertainty at 0.85
+    elif len(labels) == 2:
+        action = "HUMAN_REVIEW"
+    elif labels == ["fraud"]:
+        action = "BLOCK"
+    elif score >= config.high_uncertainty_score_threshold:
+        action = "HUMAN_REVIEW"
+    else:
+        action = "ALLOW"
+
     return {
         "fraud_probability": round(p, 6),
         "prediction_set": labels,
@@ -147,14 +157,28 @@ def expected_response(features: dict, pipeline, config: UncertaintyConfig) -> di
     }
 
 
+def _num(value, digits: int = 4) -> str:
+    return "n/a" if value is None else f"{float(value):.{digits}f}"
+
+
+def _pct(value, digits: int = 3) -> str:
+    return "n/a" if value is None else f"{float(value) * 100:.{digits}f}%"
+
+
+def _ms(value) -> str:
+    return "n/a" if value is None else f"{float(value):.1f} ms"
+
+
 def model_card(config: UncertaintyConfig, generated_at: str) -> str:
     m = config.metrics_summary
+    r5 = m.get("r5_threshold_validated")
+    r5_label = f"{float(r5):,.0f}" if r5 is not None else "500,000"
     return f"""# Model Card — `fraud-detector`
 
 **Generated:** {generated_at} · **Owner:** ML Training (Role 4)
 **Algorithm:** {config.algorithm} · **Contract:** feature list v{config.feature_list_version}
 **Conformal:** {config.method}, {config.confidence_level:.0%} confidence
-**R5 threshold:** {config.metrics_summary.get("r5_threshold_validated", "500000")}
+**R5 threshold:** {r5_label}
 
 ## Intended use
 
@@ -175,18 +199,18 @@ not validated for real money or real-world fraud.**
 
 | Metric | Value |
 |---|---:|
-| ROC-AUC | {m.get("roc_auc", "n/a")} |
-| PR-AUC | {m.get("pr_auc", "n/a")} |
-| F1 | {m.get("f1", "n/a")} |
-| Precision | {m.get("precision", "n/a")} |
-| Recall | {m.get("recall", "n/a")} |
-| MCC | {m.get("mcc", "n/a")} |
-| Brier | {m.get("brier_score", "n/a")} |
-| Hard-subset recall | {m.get("hard_subset_recall", "n/a")} |
-| Expected review rate | {m.get("expected_review_rate", "n/a")} |
-| Model-uncertain rate | {m.get("model_uncertain_rate", "n/a")} |
-| Amount-high rate | {m.get("amount_high_rate", "n/a")} |
-| Inference p95 (ms) | {m.get("inference_p95_ms", "n/a")} |
+| ROC-AUC | {_num(m.get("roc_auc"))} |
+| PR-AUC | {_num(m.get("pr_auc"))} |
+| F1 | {_num(m.get("f1"))} |
+| Precision | {_num(m.get("precision"))} |
+| Recall | {_num(m.get("recall"))} |
+| MCC | {_num(m.get("mcc"))} |
+| Brier | {_num(m.get("brier_score"), 8)} |
+| Hard-subset recall | {_num(m.get("hard_subset_recall"))} |
+| Expected review rate | {_pct(m.get("expected_review_rate"))} |
+| Model-uncertain rate | {_pct(m.get("model_uncertain_rate"))} |
+| Amount-high rate | {_pct(m.get("amount_high_rate"))} |
+| Inference p95 | {_ms(m.get("inference_p95_ms"))} |
 
 ## Decision policy
 
@@ -204,7 +228,7 @@ rejected in R3; all app-valid test frauds were caught.
 3. **App-valid selection bias:** `available >= amount` removes ~90% of PaySim
    rows; the app-valid fraud rate is ~2.9%, not the full-serving 0.297%.
 4. **Temporal drift:** the late-period fraud rate is ~7.36%; conformal fraud
-   coverage is 97.92%, but all uncovered frauds are R4 review.
+   coverage is 98.47%, but all uncovered frauds are R4 review.
 5. **No sender history** (99.85% unique senders) and a single fraud pattern.
 6. **Receivers:** destination-disjoint evaluation is clean; the model is not
    validated on unseen real-world mule behaviour.

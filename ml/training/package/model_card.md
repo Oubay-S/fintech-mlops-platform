@@ -1,9 +1,9 @@
 # Model Card — `fraud-detector`
 
-**Generated:** 2026-10-31T23:42:52.314659+00:00 · **Owner:** ML Training (Role 4)
+**Generated:** 2026-11-01T00:34:28.737312+00:00 · **Owner:** ML Training (Role 4)
 **Algorithm:** XGBClassifier · **Contract:** feature list v1.2
 **Conformal:** mondrian_conformal, 99% confidence
-**R5 threshold:** 500000.0
+**R5 threshold:** 500,000
 
 ## Intended use
 
@@ -24,18 +24,18 @@ not validated for real money or real-world fraud.**
 
 | Metric | Value |
 |---|---:|
-| ROC-AUC | 1.0 |
-| PR-AUC | 1.0 |
-| F1 | 1.0 |
-| Precision | 1.0 |
-| Recall | 1.0 |
-| MCC | 1.0 |
-| Brier | 3.3394285019607934e-07 |
-| Hard-subset recall | 1.0 |
-| Expected review rate | 0.013220471323111868 |
-| Model-uncertain rate | 0.009351930721181147 |
-| Amount-high rate | 0.003868540601930721 |
-| Inference p95 (ms) | 4.219736202503551 |
+| ROC-AUC | 1.0000 |
+| PR-AUC | 1.0000 |
+| F1 | 1.0000 |
+| Precision | 1.0000 |
+| Recall | 1.0000 |
+| MCC | 1.0000 |
+| Brier | 0.00000033 |
+| Hard-subset recall | 1.0000 |
+| Expected review rate | 1.322% |
+| Model-uncertain rate | 0.935% |
+| Amount-high rate | 0.387% |
+| Inference p95 | 4.2 ms |
 
 ## Decision policy
 
@@ -53,7 +53,7 @@ rejected in R3; all app-valid test frauds were caught.
 3. **App-valid selection bias:** `available >= amount` removes ~90% of PaySim
    rows; the app-valid fraud rate is ~2.9%, not the full-serving 0.297%.
 4. **Temporal drift:** the late-period fraud rate is ~7.36%; conformal fraud
-   coverage is 97.92%, but all uncovered frauds are R4 review.
+   coverage is 98.47%, but all uncovered frauds are R4 review.
 5. **No sender history** (99.85% unique senders) and a single fraud pattern.
 6. **Receivers:** destination-disjoint evaluation is clean; the model is not
    validated on unseen real-world mule behaviour.

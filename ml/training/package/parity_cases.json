@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "model": "fraud-detector",
-  "generated_at": "2026-10-31T23:42:52.314659+00:00",
+  "generated_at": "2026-11-01T00:34:28.737312+00:00",
   "cases": [
     {
       "name": "legit_partial_transfer",
@@ -67,7 +67,7 @@
         "fraud_probability": 5.7e-05,
         "prediction_set": [],
         "action": "HUMAN_REVIEW",
-        "uncertainty_score": 0.000882
+        "uncertainty_score": 0.85
       }
     },
     {

@@ -23,7 +23,7 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.model_selection import train_test_split
 
-from ml.common.artifact_contract import UncertaintyConfig, prediction_set, suggested_action
+from ml.common.artifact_contract import UncertaintyConfig, prediction_set
 from ml.common.paths import ML_DIR, REPO_ROOT
 from ml.common.preprocessing import build_features
 from ml.common.schema import TARGET
@@ -130,12 +130,15 @@ def main() -> None:
 
     df = pd.read_parquet(resolve(args.population))
     df["type"] = df["type"].astype("category")
-    sample, _ = train_test_split(
-        df,
-        train_size=min(args.sample_size, len(df)),
-        stratify=df[TARGET],
-        random_state=args.seed,
-    )
+    if len(df) <= args.sample_size:
+        sample = df.reset_index(drop=True)
+    else:
+        sample, _ = train_test_split(
+            df,
+            train_size=args.sample_size,
+            stratify=df[TARGET],
+            random_state=args.seed,
+        )
     sample = sample.reset_index(drop=True)
 
     features = build_features(sample)

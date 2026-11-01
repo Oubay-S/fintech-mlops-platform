@@ -38,7 +38,6 @@ from ml.common.preprocessing import (
     stratified_split,
     train_calibration_split,
 )
-from ml.common.schema import TARGET
 from ml.training.evaluation.metrics import fmt_metric, metrics_at, rule_baseline
 from ml.training.scripts.run_benchmark import make_model
 
