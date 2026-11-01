@@ -87,7 +87,7 @@ The frozen `/predict` feature contract is `ml/training/docs/feature_list_v1.md` 
 - The registered `sklearn.pipeline.Pipeline` starts at `build_preprocessor()` and expects the **10-column** frame. Serving calls `ml.common.preprocessing.build_features(raw_six_fields)` (or the `build_serving_features` alias): `to_contract_frame` is idempotent and accepts both PaySim and contract-named frames.
 - The companion `uncertainty_config.json` carries `confidence_level`, `q_hat_fraud`, `q_hat_legit`, `target_review_rate`, the feature lists, the metrics summary, and `eval_population`.
 - Example: `ml/training/docs/uncertainty_config.example.json` mirrors the final contract; the final values are in `ml/training/docs/uncertainty_config.json` (Phase 6).
-- The written contract is `docs/mlflow-artifact-contract.md` on `origin/feat/role5-mlops` (serving-authored); the handoff checklist is `ml/training/docs/serving_handoff.md`, and the open product decisions are in `ml/training/docs/team_decisions_role4.md`.
+- The written contract is `docs/mlflow-artifact-contract.md` on `origin/feat/role5-mlops` (serving-authored); the handoff checklist is `ml/training/docs/serving_handoff.md`, the open product decisions are in `ml/training/docs/team_decisions_role4.md`, and the V2.2/conventions/role5 drift is in `ml/training/docs/team_docs_drift_report.md`.
 
 ## Evaluation protocols
 

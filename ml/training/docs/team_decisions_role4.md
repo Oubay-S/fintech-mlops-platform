@@ -353,7 +353,8 @@ TRANSFER/CASH_OUT (11 features)?
 `TRANSACTION_TYPES = ["CASH_OUT", "TRANSFER"]` and restricted the API enum to
 two values. V2.2 §17.1 says ML Serving **accepts all five**; the new
 conventions says the model is **trained on all five**. Role 4's model is
-**14 features**. With Role 4's `ml/common` overlaid on the current Role 5
+trained on the app-valid two types but its encoder is pinned to **five
+categories**, so the signature is **14 features** and it can score all five. With Role 4's `ml/common` overlaid on the current Role 5
 branch, **23/25** serving tests pass; the two failures assert 11 columns
 (`(5, 14) != (5, 11)`).
 

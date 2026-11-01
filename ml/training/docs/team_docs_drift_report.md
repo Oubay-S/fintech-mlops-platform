@@ -113,8 +113,9 @@ TRANSACTION_TYPES = ["CASH_OUT", "TRANSFER"]   # 2 categories -> 11 transformed 
 
 and restricted `TransactionType` to two values. V2.2 §17.1 says ML Serving
 **accepts all five** types; the new conventions says the model is **trained on
-all 5** types (only app traffic is limited to two). Role 4's served model is
-**14 features** (9 numeric + 5 one-hot).
+all 5** types (only app traffic is limited to two). Role 4's served model is trained on the app-valid two types, but the
+encoder is pinned to **five categories**, so the signature is **14 features**
+(9 numeric + 5 one-hot) and it can score all five.
 
 Evidence: with Role 4's 14-feature `ml/common` overlaid on the current Role 5
 branch, **23/25** serving tests pass; the two failures are exactly the parity
