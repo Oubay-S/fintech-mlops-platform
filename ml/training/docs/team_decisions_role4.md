@@ -372,6 +372,10 @@ and V2.2 §17.1, the OpenAPI enum, and the fixture must change together.
 **Owner:** Role 5 + Role 4. **Impact:** blocks merging `ml/common` and the
 serving CI; no retrain if the revert wins.
 
+**Status 1 Nov:** Role 5 confirmed the revert to 14 features; pending the
+branch push. After it lands, re-run the 25-test serving suite and the six
+parity cases.
+
 ---
 
 ## Already settled (no action needed)

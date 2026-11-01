@@ -74,6 +74,9 @@ blockers that are **not** Role 4 model bugs. Resolve them before merging
 team prefers 11, Role 4 must retrain/recalibrate/repack and V2.2 §17.1, the
 OpenAPI enum, and the parity fixture must change together.
 
+**Status 1 Nov:** Role 5 confirmed the revert; re-run the serving suite and
+the six parity cases after the branch push.
+
 ### B. `docs/conventions.md` §4 is not the V2.2/OpenAPI contract
 
 The new conventions defines a flat request (`transaction_id` + six fields) and

@@ -139,6 +139,9 @@ features). It is no longer true for the current head.
 **Owner:** Role 5 + Role 4. **Impact:** without this, merging `ml/common`
 breaks CI and the model loader.
 
+**Status 1 Nov:** Role 5 confirmed the revert to 14 features; pending the
+branch push.
+
 ---
 
 ### Blocker C — amount type and request ID still unresolved
