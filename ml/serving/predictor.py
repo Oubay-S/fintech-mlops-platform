@@ -5,6 +5,7 @@ Rules enforced:
 2. Zero training-serving skew: Calls `ml.common.preprocessing.build_features` directly.
 3. Validates that the model's expected feature signature matches `FEATURE_COLUMNS`.
 """
+
 from __future__ import annotations
 
 import math
@@ -46,8 +47,7 @@ class ModelNotReadyError(RuntimeError):
 class SupportsPredictProba(Protocol):
     """Protocol for trained scikit-learn pipelines / estimators supporting `predict_proba`."""
 
-    def predict_proba(self, X: pd.DataFrame | np.ndarray) -> np.ndarray:
-        ...
+    def predict_proba(self, X: pd.DataFrame | np.ndarray) -> np.ndarray: ...
 
 
 @dataclass(frozen=True)
@@ -55,7 +55,9 @@ class PredictionOutcome:
     """Internal result combining the API response and finite Prometheus metric labels."""
 
     response: PredictResponse
-    review_reason: str | None  # Finite values: "ambiguous_set", "empty_set", "high_score", or None
+    review_reason: (
+        str | None
+    )  # Finite values: "ambiguous_set", "empty_set", "high_score", or None
 
 
 class Predictor(ABC):
@@ -194,7 +196,9 @@ class TrainedModelPredictor(Predictor):
             top_indices = np.argsort(np.abs(contribs))[::-1][:3]
             return [
                 FeatureExplanation(
-                    feature=str(feature_names[idx]).removeprefix("num__").removeprefix("cat__"),
+                    feature=str(feature_names[idx])
+                    .removeprefix("num__")
+                    .removeprefix("cat__"),
                     contribution=round(float(contribs[idx]), 4),
                 )
                 for idx in top_indices
@@ -208,11 +212,13 @@ class TrainedModelPredictor(Predictor):
         engineered_df = self.features_to_dataframe(request.features)
         proba_matrix = np.asarray(self._model.predict_proba(engineered_df), dtype=float)
         if proba_matrix.ndim != 2 or proba_matrix.shape[1] < 2:
-            raise ValueError(f"Expected 2-class probability array, got shape {proba_matrix.shape}")
+            raise ValueError(
+                f"Expected 2-class probability array, got shape {proba_matrix.shape}"
+            )
 
         fraud_prob = float(np.clip(proba_matrix[0, 1], 0.0, 1.0))
-        prediction_set, uncertainty_score, action, review_reason = self._compute_conformal_set(
-            fraud_prob
+        prediction_set, uncertainty_score, action, review_reason = (
+            self._compute_conformal_set(fraud_prob)
         )
         explanations = self._extract_fast_explanations(engineered_df)
 

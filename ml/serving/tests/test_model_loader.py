@@ -4,6 +4,7 @@ Logs a real `sklearn` Pipeline (`build_preprocessor()` + `LogisticRegression`) a
 `uncertainty_config.json` to `tmp_path`, sets alias `production`, and verifies
 `MLflowModelLoader.load_by_alias()` and `ModelRegistryHolder`.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

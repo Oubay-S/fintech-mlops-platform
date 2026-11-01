@@ -3,6 +3,7 @@
 Loads a registered model by alias (`models:/{model_name}@{model_alias}`) along with
 its companion `uncertainty_config.json` artifact from the same MLflow run.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,7 +17,9 @@ from pathlib import Path
 from ml.common.artifact_contract import (
     MODEL_ARTIFACT_PATH,
     UNCERTAINTY_CONFIG_ARTIFACT,
+    UNCERTAINTY_SHA256_TAG,
     UncertaintyConfigContract,
+    verify_uncertainty_sha256,
 )
 from ml.common.schema import FEATURE_COLUMNS
 
@@ -67,6 +70,8 @@ class MLflowModelLoader:
         mv = client.get_model_version_by_alias(name=resolved_name, alias=resolved_alias)
         version_str = str(mv.version)
         run_id = str(mv.run_id)
+        run = client.get_run(run_id)
+        expected_sha256 = run.data.tags.get(UNCERTAINTY_SHA256_TAG)
 
         with tempfile.TemporaryDirectory(prefix="mlflow_uncertainty_") as tmp_dir:
             config_local_path = Path(
@@ -76,8 +81,19 @@ class MLflowModelLoader:
                     dst_path=tmp_dir,
                 )
             )
-            raw_config = json.loads(config_local_path.read_text(encoding="utf-8"))
+            raw_bytes = config_local_path.read_bytes()
+            raw_config = json.loads(raw_bytes.decode("utf-8"))
             uncertainty_config = UncertaintyConfigContract.from_dict(raw_config)
+            if expected_sha256 and not verify_uncertainty_sha256(
+                expected_sha256=expected_sha256,
+                config=uncertainty_config,
+                raw_bytes=raw_bytes,
+                raw_dict=raw_config,
+            ):
+                raise ValueError(
+                    f"Atomic uncertainty_config.json SHA-256 mismatch for run {run_id}: "
+                    f"run tag {UNCERTAINTY_SHA256_TAG}={expected_sha256} does not match artifact."
+                )
 
         # Load the trained sklearn pipeline by model alias URI
         model_uri = f"models:/{resolved_name}@{resolved_alias}"
@@ -113,7 +129,9 @@ class MLflowModelLoader:
 class ModelRegistryHolder:
     """Thread-safe container holding the active `Predictor` instance and background loader thread."""
 
-    def __init__(self, settings: ServingSettings, loader: MLflowModelLoader | None = None) -> None:
+    def __init__(
+        self, settings: ServingSettings, loader: MLflowModelLoader | None = None
+    ) -> None:
         self._settings = settings
         self._loader = loader or MLflowModelLoader(settings)
         self._lock = threading.RLock()

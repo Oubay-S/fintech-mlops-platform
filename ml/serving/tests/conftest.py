@@ -1,4 +1,5 @@
 """Shared pytest fixtures and trained-model factory for ML serving tests."""
+
 from __future__ import annotations
 
 from pathlib import Path

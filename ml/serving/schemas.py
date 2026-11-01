@@ -6,6 +6,7 @@ Strictly enforces:
 - `amount >= 0.0` (supports the 16 PaySim zero-amount fraud rows for parity tests).
 - `schema_version` validation (`^1\\.[0-9]+$`) with dedicated error code `UNSUPPORTED_SCHEMA_VERSION`.
 """
+
 from __future__ import annotations
 
 import re

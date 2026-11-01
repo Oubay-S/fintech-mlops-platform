@@ -4,6 +4,7 @@ Every derived feature is computable at decision time from the six contract
 fields. The same module is imported by the training pipeline and by the
 serving code (parity is enforced by tests).
 """
+
 from __future__ import annotations
 
 import pandas as pd

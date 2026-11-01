@@ -11,6 +11,7 @@ Implements:
 - Structured JSON request logging (never logs raw feature payloads or secrets)
 - Route-template Prometheus HTTP metrics (no raw path cardinality explosion)
 """
+
 from __future__ import annotations
 
 import json
@@ -83,7 +84,9 @@ def _try_parse_uuid(raw: Any) -> UUID | None:
     return None
 
 
-def _resolve_request_id(request: Request, body_dict: dict[str, Any] | None = None) -> UUID:
+def _resolve_request_id(
+    request: Request, body_dict: dict[str, Any] | None = None
+) -> UUID:
     """Resolve `request_id` in priority order: JSON body -> X-Request-ID -> X-Correlation-Id -> new UUID4."""
     if isinstance(body_dict, dict):
         from_body = _try_parse_uuid(body_dict.get("request_id"))

@@ -8,6 +8,7 @@ Verifies:
    `EmbeddingVizResponse`, `ErrorResponse`) match without drift.
 4. All example payloads in `docs/api/ml-predict-openapi.yaml` validate cleanly against the Pydantic schemas.
 """
+
 from __future__ import annotations
 
 import yaml
@@ -106,18 +107,24 @@ def test_yaml_examples_validate_against_pydantic_schemas() -> None:
     yaml_spec = yaml.safe_load(OPENAPI_YAML_PATH.read_text(encoding="utf-8"))
     predict_post = yaml_spec["paths"]["/predict"]["post"]
 
-    req_examples = predict_post["requestBody"]["content"]["application/json"]["examples"]
+    req_examples = predict_post["requestBody"]["content"]["application/json"][
+        "examples"
+    ]
     for ex_name, ex_obj in req_examples.items():
         validated = PredictRequest.model_validate(ex_obj["value"])
         assert validated.schema_version == "1.0", ex_name
 
-    resp_200_examples = predict_post["responses"]["200"]["content"]["application/json"]["examples"]
+    resp_200_examples = predict_post["responses"]["200"]["content"]["application/json"][
+        "examples"
+    ]
     for ex_name, ex_obj in resp_200_examples.items():
         validated_resp = PredictResponse.model_validate(ex_obj["value"])
         assert validated_resp.schema_version == "1.0", ex_name
 
     for status_code in ("401", "422", "503"):
-        err_examples = predict_post["responses"][status_code]["content"]["application/json"]["examples"]
+        err_examples = predict_post["responses"][status_code]["content"][
+            "application/json"
+        ]["examples"]
         for ex_name, ex_obj in err_examples.items():
             validated_err = ErrorResponse.model_validate(ex_obj["value"])
             assert str(validated_err.status) == status_code, ex_name

@@ -7,6 +7,7 @@ Guarantees:
    `ambiguous_set`, `empty_set`, `high_score`.
 3. `ml_model_info` clears stale label sets (`ml_model_info.clear()`) whenever a model is loaded.
 """
+
 from __future__ import annotations
 
 from prometheus_client import Counter, Gauge, Histogram

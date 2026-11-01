@@ -1,4 +1,5 @@
 """Comprehensive functional, readiness, security, validation, metrics, and latency test suite."""
+
 from __future__ import annotations
 
 import json
@@ -182,7 +183,9 @@ def test_predict_confident_fraud_block(
     assert len(data["explanations"]) > 0
 
 
-def test_predict_uncertain_ambiguous_and_empty_sets(test_settings: ServingSettings) -> None:
+def test_predict_uncertain_ambiguous_and_empty_sets(
+    test_settings: ServingSettings,
+) -> None:
     pipeline, _ = build_trained_sklearn_pipeline()
 
     # 1. Ambiguous conformal thresholds (both q_hat_legit and q_hat_fraud = 0.999 -> ["legit", "fraud"])
@@ -542,8 +545,14 @@ def test_prometheus_metrics_increment_with_route_templates_and_finite_reasons(
 
     metrics_text = client.get("/metrics").text
     assert "ml_ready 1.0" in metrics_text
-    assert 'ml_model_info{alias="production",model_name="fraud-detector",stage="Production",version="3"} 1.0' in metrics_text
-    assert 'ml_predictions_total{action="BLOCK",model_version="3",prediction_set="fraud"}' in metrics_text
+    assert (
+        'ml_model_info{alias="production",model_name="fraud-detector",stage="Production",version="3"} 1.0'
+        in metrics_text
+    )
+    assert (
+        'ml_predictions_total{action="BLOCK",model_version="3",prediction_set="fraud"}'
+        in metrics_text
+    )
     # Route template `/viz/{method}` must appear, NEVER raw `/viz/umap`
     assert 'route="/viz/{method}"' in metrics_text
     assert 'route="/viz/umap"' not in metrics_text

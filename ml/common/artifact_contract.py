@@ -6,8 +6,11 @@ This module defines the single canonical contract for:
 3. Artifact layout inside an MLflow run (`model/` + `uncertainty_config.json`).
 4. Expected 14-column transformed feature signature after `build_preprocessor()`.
 """
+
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -22,13 +25,21 @@ from .schema import (
 # 1. MLflow Registry & Experiment Naming Contract
 # ---------------------------------------------------------------------------
 DEFAULT_EXPERIMENT_NAME = "paysim-fraud-benchmark"
+EXPERIMENT_NAME = DEFAULT_EXPERIMENT_NAME
 REGISTERED_MODEL_NAME = "fraud-detector"
-PRODUCTION_ALIAS = "production"
+MODEL_NAME = REGISTERED_MODEL_NAME
+
+CANDIDATE_ALIAS = "candidate"
 STAGING_ALIAS = "staging"
+PRODUCTION_ALIAS = "production"
+PREVIOUS_ALIAS = "previous"
 
 # Artifacts expected inside every registered MLflow model run
 MODEL_ARTIFACT_PATH = "model"
 UNCERTAINTY_CONFIG_ARTIFACT = "uncertainty_config.json"
+STATISTICAL_VALIDATION_ARTIFACT = "statistical_validation.json"
+UNCERTAINTY_SHA256_TAG = "uncertainty_config_sha256"
+DATA_SOURCE_TAG = "data_source"
 
 # Expected 14 transformed feature names out of `build_preprocessor()` (9 numeric + 5 one-hot)
 EXPECTED_TRANSFORMED_FEATURES: list[str] = list(NUMERIC_FEATURES) + [
@@ -98,10 +109,16 @@ class UncertaintyConfigContract:
 
     def validate(self) -> None:
         """Validate conformal configuration invariants."""
-        if self.method not in ("split_conformal", "mondrian_conformal", "ensemble_bootstrap"):
+        if self.method not in (
+            "split_conformal",
+            "mondrian_conformal",
+            "ensemble_bootstrap",
+        ):
             raise ValueError(f"Unsupported uncertainty method: {self.method}")
         if not (0.5 <= self.confidence_level <= 0.999):
-            raise ValueError(f"confidence_level out of range [0.5, 0.999]: {self.confidence_level}")
+            raise ValueError(
+                f"confidence_level out of range [0.5, 0.999]: {self.confidence_level}"
+            )
         if not (0.0 < self.q_hat_fraud <= 1.0):
             raise ValueError(f"q_hat_fraud must be in (0, 1]: {self.q_hat_fraud}")
         if not (0.0 < self.q_hat_legit <= 1.0):
@@ -112,12 +129,30 @@ class UncertaintyConfigContract:
                 f"Feature signature mismatch: model expects {self.feature_names}, "
                 f"serving pipeline produces {expected_input}"
             )
+        if list(self.transformed_feature_names) != list(EXPECTED_TRANSFORMED_FEATURES):
+            raise ValueError(
+                f"Transformed feature signature mismatch: model expects {self.transformed_feature_names}, "
+                f"serving pipeline produces {EXPECTED_TRANSFORMED_FEATURES}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    def sha256(self) -> str:
+        """Compute canonical SHA-256 hex digest of this uncertainty configuration."""
+        return compute_uncertainty_sha256(self.to_dict())
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> UncertaintyConfigContract:
+        transformed = data.get("transformed_feature_names") or data.get(
+            "model_feature_names"
+        )
+        raw_metrics = data.get("metrics_summary", {})
+        clean_metrics = {
+            str(k): float(v)
+            for k, v in raw_metrics.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool)
+        }
         cfg = cls(
             method=str(data.get("method", "split_conformal")),
             confidence_level=float(data.get("confidence_level", 0.95)),
@@ -133,12 +168,60 @@ class UncertaintyConfigContract:
                 data.get("feature_names", CONTRACT_FEATURES + DERIVED_FEATURES)
             ),
             transformed_feature_names=list(
-                data.get("transformed_feature_names", EXPECTED_TRANSFORMED_FEATURES)
+                transformed
+                if transformed is not None
+                else EXPECTED_TRANSFORMED_FEATURES
             ),
-            metrics_summary={
-                str(k): float(v)
-                for k, v in data.get("metrics_summary", {}).items()
-            },
+            metrics_summary=clean_metrics,
         )
         cfg.validate()
         return cfg
+
+
+# Alias for Role 4 training compatibility
+UncertaintyConfig = UncertaintyConfigContract
+
+
+def compute_uncertainty_sha256(
+    config: UncertaintyConfigContract | dict[str, Any],
+) -> str:
+    """Compute deterministic SHA-256 hex digest over the canonical uncertainty config."""
+    if isinstance(config, UncertaintyConfigContract):
+        payload = config.to_dict()
+    else:
+        payload = UncertaintyConfigContract.from_dict(config).to_dict()
+    canonical_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    return hashlib.sha256(canonical_bytes).hexdigest()
+
+
+def verify_uncertainty_sha256(
+    *,
+    expected_sha256: str,
+    config: UncertaintyConfigContract,
+    raw_bytes: bytes | None = None,
+    raw_dict: dict[str, Any] | None = None,
+) -> bool:
+    """Verify an uncertainty config against its recorded SHA-256 tag.
+
+    Accepts a match against:
+    1. The canonical `UncertaintyConfigContract` SHA-256 (`compute_uncertainty_sha256(config)`).
+    2. The sorted-keys JSON digest of `raw_dict` (if training included extra metadata keys).
+    3. The exact `raw_bytes` file digest (if computed directly on file bytes).
+    """
+    expected = expected_sha256.strip().lower()
+    if not expected:
+        return False
+    if compute_uncertainty_sha256(config).lower() == expected:
+        return True
+    if raw_dict is not None:
+        raw_canonical = json.dumps(
+            raw_dict, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        if hashlib.sha256(raw_canonical).hexdigest().lower() == expected:
+            return True
+    return bool(
+        raw_bytes is not None
+        and hashlib.sha256(raw_bytes).hexdigest().lower() == expected
+    )

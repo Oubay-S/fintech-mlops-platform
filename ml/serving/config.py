@@ -4,6 +4,7 @@ Notes:
 - `MODEL_STAGE` is intentionally removed in favor of MLflow 2.x `MODEL_ALIAS` (`production` / `staging`).
 - Includes S3 / MinIO artifact store settings (`MLFLOW_S3_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`).
 """
+
 from __future__ import annotations
 
 import os
@@ -79,7 +80,9 @@ class ServingSettings:
     @classmethod
     def from_env(cls) -> ServingSettings:
         viz_dir_raw = os.environ.get("VIZ_DATA_DIR", "").strip()
-        viz_dir = Path(viz_dir_raw) if viz_dir_raw else (ML_DIR / "visualization" / "data")
+        viz_dir = (
+            Path(viz_dir_raw) if viz_dir_raw else (ML_DIR / "visualization" / "data")
+        )
         return cls(
             host=os.environ.get("HOST", "0.0.0.0").strip(),
             port=_env_int("PORT", 8000),
@@ -98,7 +101,9 @@ class ServingSettings:
             model_name=os.environ.get("MODEL_NAME", REGISTERED_MODEL_NAME).strip(),
             model_alias=os.environ.get("MODEL_ALIAS", PRODUCTION_ALIAS).strip().lower(),
             startup_load_enabled=_env_bool("STARTUP_LOAD_ENABLED", True),
-            loader_initial_backoff_seconds=_env_float("LOADER_INITIAL_BACKOFF_SECONDS", 1.0),
+            loader_initial_backoff_seconds=_env_float(
+                "LOADER_INITIAL_BACKOFF_SECONDS", 1.0
+            ),
             loader_max_backoff_seconds=_env_float("LOADER_MAX_BACKOFF_SECONDS", 30.0),
             loader_max_attempts=_env_int("LOADER_MAX_ATTEMPTS", 0),
             viz_data_dir=viz_dir,

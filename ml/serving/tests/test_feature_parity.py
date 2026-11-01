@@ -7,6 +7,7 @@ Verifies:
    (`EXPECTED_TRANSFORMED_FEATURES`).
 3. A mismatch in feature order or column names raises `ValueError` during model initialization.
 """
+
 from __future__ import annotations
 
 import json
@@ -77,7 +78,9 @@ def test_preprocessor_transformed_signature_matches_contract() -> None:
     assert names_out == list(EXPECTED_TRANSFORMED_FEATURES)
 
 
-def test_signature_mismatch_raises_value_error(trained_predictor: TrainedModelPredictor) -> None:
+def test_signature_mismatch_raises_value_error(
+    trained_predictor: TrainedModelPredictor,
+) -> None:
     bad_config = UncertaintyConfigContract(
         feature_names=["amount", "type"]  # Wrong order and missing features
     )
