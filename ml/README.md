@@ -79,19 +79,19 @@ pytest ml/training/tests -q
 
 ## Contract
 
-The frozen `/predict` feature contract is `ml/training/docs/feature_list_v1.md` (v1.1, 27 Oct). It defines the six app fields, the four derived features, the call timing (one score at transfer creation; no preview/fingerprint), and the evaluation protocol.
+The frozen `/predict` feature contract is `ml/training/docs/feature_list_v1.md` (v1.2, 29 Oct). It defines the six app fields, the four derived features, the call timing (one score at transfer creation; no preview/fingerprint), and the evaluation protocol.
 
 ## MLflow artifact contract (Role 4 → Role 5)
 
 - Implementation: `ml/common/artifact_contract.py` — `UncertaintyConfig`, `prediction_set`, `suggested_action`, `log_pipeline`.
-- The registered `sklearn.pipeline.Pipeline` starts at `build_preprocessor()` and expects the **10-column** frame. Serving must call `ml.common.preprocessing.build_serving_features(raw_six_fields)` first; `build_features()` is the PaySim-column training counterpart and would fail on a contract-named payload.
+- The registered `sklearn.pipeline.Pipeline` starts at `build_preprocessor()` and expects the **10-column** frame. Serving calls `ml.common.preprocessing.build_features(raw_six_fields)` (or the `build_serving_features` alias): `to_contract_frame` is idempotent and accepts both PaySim and contract-named frames.
 - The companion `uncertainty_config.json` carries `confidence_level`, `q_hat_fraud`, `q_hat_legit`, `target_review_rate`, the feature lists, the metrics summary, and `eval_population`.
 - Example: `ml/training/docs/uncertainty_config.example.json` mirrors the final contract; the final values are in `ml/training/docs/uncertainty_config.json` (Phase 6).
-- The written contract is `mlflow-artifact-contract.md` at the project root (serving-authored).
+- The written contract is `docs/mlflow-artifact-contract.md` on `origin/feat/role5-mlops` (serving-authored); the handoff checklist is `ml/training/docs/serving_handoff.md`, and the open product decisions are in `ml/training/docs/team_decisions_role4.md`.
 
 ## Evaluation protocols
 
-- **Primary:** stratified random 80/20 split (seed 42) — used for the benchmark and the statistics. Report **in-scope** (`TRANSFER` + `CASH_OUT`) and **app-valid** (`amount > 0`, `amount <= sender_old_balance`) metrics; the app-valid population is the serving estimate (2.903% fraud in the baseline test split).
+- **Primary:** stratified random 80/20 split (seed 42) — used for the benchmark and the statistics. Report **in-scope** (`TRANSFER` + `CASH_OUT`) and **app-valid** (`amount > 0`, `amount <= sender_old_balance`) metrics; the app-valid population is the serving estimate (2.899% overall; 2.903% in the baseline test split).
 - **Robustness:** temporal holdout (later 20% of rows by `step`, no hour overlap) and a **destination-disjoint** holdout (group split by `nameDest`); sender-disjoint is trivial on PaySim (99.85% unique senders).
 - **Calibration:** 20% of the primary training set (stratified), reserved for **class-conditional (Mondrian)** conformal prediction on the in-scope/app-valid population.
 - **Baseline evidence:** the report includes the rule baseline, the rule-negative hard subset, and the serving-consistent balance variant; the headline ROC-AUC is a dataset property.
