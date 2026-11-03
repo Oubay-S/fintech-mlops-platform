@@ -1,0 +1,120 @@
+# ML — PaySim fraud detection (Role 4)
+
+This folder contains the ML Training deliverables. **Role 4 owns `ml/common/`, `ml/training/`, `ml/visualization/`, `ml/load-tests/`.** Role 5 owns `ml/serving/` and `ml/pipeline/`.
+
+## Structure
+
+```
+ml/
+├── common/            # shared preprocessing + loading (used by training AND serving)
+│   ├── paths.py       # dataset path resolution (PAYSIM_PATH override)
+│   ├── schema.py      # column/contract definitions + validation
+│   ├── loading.py     # Parquet loader
+│   └── preprocessing.py  # contract mapping, derived features, temporal split
+├── training/
+│   ├── eda/           # exploratory analysis scripts
+│   ├── docs/          # EDA report, figures, dataset decision, feature list v1.2
+│   └── tests/         # pytest for the shared module (drift guard)
+├── visualization/     # PCA / t-SNE / UMAP exports (Role 4)
+├── load-tests/        # Locust scenarios (Role 4)
+├── serving/           # Role 5
+├── pipeline/          # Role 5
+├── data/              # LOCAL ONLY, git-ignored
+│   └── paysim/        # paysim.parquet, sample, raw/
+└── requirements.txt
+```
+
+## Data
+
+The data is **local and git-ignored** (`data/`, `*.csv`, `*.parquet` in the root `.gitignore`).
+
+- `ml/data/paysim/paysim.parquet` — full dataset (6,362,620 rows, ~210 MB)
+- `ml/data/paysim/paysim_sample_200k.parquet` — 200k stratified sample (258 frauds)
+- `ml/data/paysim/raw/PS_20174392719_1491204439457_log.csv` — original file
+
+To use a different location, set `PAYSIM_PATH=/path/to/paysim.parquet` (full) or `PAYSIM_DATA_DIR` (folder containing both Parquet files).
+
+## Commands
+
+Use the Python 3.11 serving-compatible venv (`source ml/.venv/bin/activate`). From the repository root:
+
+```bash
+# first EDA pass: stats + figures + report
+python -m ml.training.eda.eda_profile
+
+# build splits + fit the shared preprocessor (full data)
+python -m ml.training.scripts.prepare_data
+
+# baseline (full) + optional ablation preview
+python -m ml.training.scripts.run_baseline --ablation
+
+# build the cached benchmark populations (app-valid, in-scope, 1M samples)
+python -m ml.training.scripts.build_populations
+
+# Phase 4 benchmark — reproduce the committed 225-row, three-protocol run
+for protocol in contract restricted rule_blind; do
+  python -m ml.training.scripts.run_benchmark \
+    --population app_valid --protocol "$protocol" \
+    --models lr,rf,xgb,svm,mlp --folds 5 --seeds 42,43,44 --append
+done
+
+# smoke test on the 100k app-valid sample (2 folds, 1 seed)
+python -m ml.training.scripts.run_benchmark --population app_valid_sample_100k --models lr --quick
+
+# temporal + destination-disjoint robustness
+python -m ml.training.scripts.run_robustness
+
+# Mondrian conformal + R1–R6 decision mix (--log-mlflow registers @candidate; the gate promotes)
+python -m ml.training.scripts.run_conformal --model xgb --confidence 0.99 --r5 500000 --r5-alt 324610
+
+# export PCA / t-SNE / UMAP JSON for GET /viz/{method}
+python -m ml.visualization.export_embeddings
+
+# statistical validation JSON for the MLOps gate (run before --log-mlflow)
+python -m ml.training.scripts.run_statistics
+
+# assemble the serving handoff package (model card, metrics, parity cases)
+python -m ml.training.scripts.package_model
+
+# same on the 200k sample
+python -m ml.training.scripts.prepare_data --sample
+python -m ml.training.scripts.run_baseline --sample
+
+# tests for the shared module and preprocessing
+pytest ml/training/tests -q
+```
+
+## Contract
+
+The frozen `/predict` feature contract is `ml/training/docs/feature_list_v1.md` (v1.2, 29 Oct). It defines the six app fields, the four derived features, the call timing (one score at transfer creation; no preview/fingerprint), and the evaluation protocol.
+
+## MLflow artifact contract (Role 4 → Role 5)
+
+- Implementation: `ml/common/artifact_contract.py` — `UncertaintyConfig`, `prediction_set`, `suggested_action`, `log_pipeline`.
+- The registered `sklearn.pipeline.Pipeline` starts at `build_preprocessor()` and expects the **10-column** frame. Serving calls `ml.common.preprocessing.build_features(raw_six_fields)` (or the `build_serving_features` alias): `to_contract_frame` is idempotent and accepts both PaySim and contract-named frames.
+- The companion `uncertainty_config.json` carries `confidence_level`, `q_hat_fraud`, `q_hat_legit`, `target_review_rate`, the feature lists, the metrics summary, and `eval_population`.
+- Example: `ml/training/docs/uncertainty_config.example.json` mirrors the final contract; the final values are in `ml/training/docs/uncertainty_config.json` (Phase 6).
+- The written contract is `docs/mlflow-artifact-contract.md` on `origin/feat/role5-mlops` (serving-authored); the handoff checklist is `ml/training/docs/serving_handoff.md`, the open product decisions are in `ml/training/docs/team_decisions_role4.md`, and the V2.2/conventions/role5 drift is in `ml/training/docs/team_docs_drift_report.md`.
+
+## Evaluation protocols
+
+- **Primary:** stratified random 80/20 split (seed 42) — used for the benchmark and the statistics. Report **in-scope** (`TRANSFER` + `CASH_OUT`) and **app-valid** (`amount > 0`, `amount <= sender_old_balance`) metrics; the app-valid population is the serving estimate (2.899% overall; 2.903% in the baseline test split).
+- **Robustness:** temporal holdout (later 20% of rows by `step`, no hour overlap) and a **destination-disjoint** holdout (group split by `nameDest`); sender-disjoint is trivial on PaySim (99.85% unique senders).
+- **Calibration:** 20% of the primary training set (stratified), reserved for **class-conditional (Mondrian)** conformal prediction on the in-scope/app-valid population.
+- **Baseline evidence:** the report includes the rule baseline, the rule-negative hard subset, and the serving-consistent balance variant; the headline ROC-AUC is a dataset property.
+
+JupyterLab is installed on the workstation. From the repository root:
+
+```bash
+jupyter lab
+# open: ml/training/eda/01_eda.ipynb
+```
+
+The notebook imports the same `ml.common` modules as the pipeline, so data loading and contract definitions cannot drift. It is for exploration; the reproducible report and figures are generated by `eda_profile.py`.
+
+## Rules
+
+- Never commit datasets or model binaries; use the Parquet cache and MLflow artifacts.
+- The shared preprocessing module (`ml/common/preprocessing.py`) is the single implementation used by training and serving — keep it in sync.
+- Contract features are the six fields from `ml/training/docs/feature_list_v1.md` (v1.2); `isFlaggedFraud`, `step`, and account IDs are never features.
+- Feature work must be computable at decision time from the contract fields.

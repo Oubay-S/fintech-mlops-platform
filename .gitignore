@@ -41,6 +41,11 @@ out/
 docker-compose.override.yml
 
 # ===========================
+# Jupyter
+# ===========================
+.ipynb_checkpoints/
+
+# ===========================
 # IDEs
 # ===========================
 .idea/
@@ -57,9 +62,15 @@ Thumbs.db
 # ===========================
 *.csv
 *.tsv
+*.parquet
+# Small, committed benchmark result tables (not datasets)
+!ml/training/results/*.csv
 data/
 !k8s/data/
 !k8s/data/.gitkeep
+# Role 4 visualization exports consumed by ML Serving GET /viz/{method}
+!ml/visualization/data/
+!ml/visualization/data/*.json
 *.pkl
 *.joblib
 *.h5

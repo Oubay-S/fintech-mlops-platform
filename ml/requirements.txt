@@ -1,0 +1,26 @@
+# ML dependencies — Role 4 (PaySim)
+# Pinned to the ML Serving container versions (Python 3.11) so the MLflow
+# artifact deserializes with the same sklearn/xgboost ABI.
+numpy==1.26.4
+pandas==2.2.3
+scipy==1.14.1
+scikit-learn==1.6.1
+xgboost==2.1.4
+joblib==1.4.2
+pyarrow==17.0.0
+mlflow==2.16.2
+# MLflow 2.16 imports FallbackAsyncAdaptedQueuePool, removed in SQLAlchemy 2.1;
+# without this pin a fresh install resolves 2.1.x and breaks sqlite-backed
+# tracking/registry (the serving test suite uses sqlite).
+sqlalchemy==2.0.36
+boto3==1.35.90
+pyyaml==6.0.2
+
+# Training, reports and visualization
+matplotlib==3.9.4
+seaborn==0.13.2
+jupyterlab==4.3.4
+ipykernel==6.29.5
+umap-learn==0.5.7
+locust==2.32.5
+pytest==8.3.4
