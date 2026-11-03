@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "results_csv": "/home/soulaymane/dev/learning/jee-ml/fintech-mlops-platform/ml/training/results/benchmark_runs.csv",
+  "results_csv": "ml/training/results/benchmark_runs.csv",
   "metrics": [
     "pr_auc",
     "hard_recall",

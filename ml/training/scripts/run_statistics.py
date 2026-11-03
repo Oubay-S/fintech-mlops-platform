@@ -33,6 +33,8 @@ DEFAULT_RESULTS = ML_DIR / "training" / "results" / "benchmark_runs.csv"
 DEFAULT_REPORT = ML_DIR / "training" / "docs" / "statistical_validation.md"
 DEFAULT_JSON = ML_DIR / "training" / "results" / "statistical_validation.json"
 MODEL_ORDER = ["lr", "rf", "xgb", "svm", "mlp"]
+EXPECTED_PROTOCOLS = ["contract", "restricted", "rule_blind"]
+EXPECTED_BLOCKS = 15  # 5 folds x 3 seeds
 METRIC_LABELS = {
     "pr_auc": "PR-AUC",
     "roc_auc": "ROC-AUC",
@@ -78,6 +80,62 @@ def paired_ci(diff: np.ndarray) -> tuple[float, float, float]:
     sem = float(st.sem(diff))
     low, high = st.t.interval(0.95, len(diff) - 1, loc=mean, scale=sem)
     return mean, float(low), float(high)
+
+
+def validate_benchmark(
+    results: pd.DataFrame,
+    *,
+    expected_models: list[str],
+    expected_protocols: list[str],
+    expected_blocks: int,
+    allow_partial: bool = False,
+) -> None:
+    """Fail closed when the tidy results are not the full benchmark contract.
+
+    The promotion gate consumes this artifact, so a truncated CSV (missing
+    model/protocol/fold/seed) must not silently produce "valid" statistics.
+    """
+    required = {"population", "protocol", "model", "fold", "seed"}
+    missing = required - set(results.columns)
+    if missing:
+        raise ValueError(f"Benchmark CSV missing columns: {sorted(missing)}")
+    duplicate_keys = int(
+        results.duplicated(["population", "protocol", "model", "fold", "seed"]).sum()
+    )
+    if duplicate_keys:
+        raise ValueError(f"Benchmark CSV has {duplicate_keys} duplicate run keys")
+    if allow_partial:
+        return
+
+    observed_protocols = set(results["protocol"])
+    missing_protocols = set(expected_protocols) - observed_protocols
+    if missing_protocols:
+        raise ValueError(
+            f"Benchmark CSV missing protocols: {sorted(missing_protocols)}"
+        )
+
+    for (population, protocol), frame in results.groupby(["population", "protocol"]):
+        models = set(frame["model"])
+        missing_models = set(expected_models) - models
+        if missing_models:
+            raise ValueError(
+                f"{population}/{protocol}: missing models {sorted(missing_models)}"
+            )
+        blocks = frame[["fold", "seed"]].drop_duplicates()
+        if len(blocks) != expected_blocks:
+            raise ValueError(
+                f"{population}/{protocol}: expected {expected_blocks} fold x seed "
+                f"blocks, found {len(blocks)}"
+            )
+        per_model = frame.groupby("model")[["fold", "seed"]].apply(
+            lambda group: len(group.drop_duplicates())
+        )
+        short = per_model[per_model != expected_blocks]
+        if not short.empty:
+            raise ValueError(
+                f"{population}/{protocol}: incomplete blocks per model: "
+                f"{short.to_dict()}"
+            )
 
 
 def analyse(
@@ -196,9 +254,13 @@ def write_json(
 ) -> Path:
     """Machine-readable statistical validation for the MLOps gate."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        results_label = results_path.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        results_label = results_path.name
     payload = {
         "schema_version": "1.0",
-        "results_csv": str(results_path),
+        "results_csv": results_label,
         "metrics": metrics,
         "findings": findings,
     }
@@ -211,10 +273,28 @@ def main() -> None:
     parser.add_argument("--results", default=str(DEFAULT_RESULTS))
     parser.add_argument("--report", default=str(DEFAULT_REPORT))
     parser.add_argument("--json", default=str(DEFAULT_JSON))
+    parser.add_argument(
+        "--expected-blocks",
+        type=int,
+        default=EXPECTED_BLOCKS,
+        help="fold x seed blocks per population/protocol (default: 15)",
+    )
+    parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="skip the full-benchmark validation for exploratory runs",
+    )
     parser.add_argument("--metrics", default="pr_auc,hard_recall,consistent_hard_recall,f1")
     args = parser.parse_args()
 
     results = pd.read_csv(resolve(args.results))
+    validate_benchmark(
+        results,
+        expected_models=MODEL_ORDER,
+        expected_protocols=EXPECTED_PROTOCOLS,
+        expected_blocks=args.expected_blocks,
+        allow_partial=args.allow_partial,
+    )
     metrics = [metric.strip() for metric in args.metrics.split(",") if metric.strip()]
     findings = analyse(results, metrics)
     if not findings:

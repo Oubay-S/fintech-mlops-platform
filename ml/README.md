@@ -13,7 +13,7 @@ ml/
 │   └── preprocessing.py  # contract mapping, derived features, temporal split
 ├── training/
 │   ├── eda/           # exploratory analysis scripts
-│   ├── docs/          # EDA report, figures, dataset decision, feature list v1.1
+│   ├── docs/          # EDA report, figures, dataset decision, feature list v1.2
 │   └── tests/         # pytest for the shared module (drift guard)
 ├── visualization/     # PCA / t-SNE / UMAP exports (Role 4)
 ├── load-tests/        # Locust scenarios (Role 4)
@@ -51,8 +51,12 @@ python -m ml.training.scripts.run_baseline --ablation
 # build the cached benchmark populations (app-valid, in-scope, 1M samples)
 python -m ml.training.scripts.build_populations
 
-# Phase 4 benchmark — primary app-valid population
-python -m ml.training.scripts.run_benchmark --population app_valid --models lr,rf,xgb
+# Phase 4 benchmark — reproduce the committed 225-row, three-protocol run
+for protocol in contract restricted rule_blind; do
+  python -m ml.training.scripts.run_benchmark \
+    --population app_valid --protocol "$protocol" \
+    --models lr,rf,xgb,svm,mlp --folds 5 --seeds 42,43,44 --append
+done
 
 # smoke test on the 100k app-valid sample (2 folds, 1 seed)
 python -m ml.training.scripts.run_benchmark --population app_valid_sample_100k --models lr --quick
@@ -112,5 +116,5 @@ The notebook imports the same `ml.common` modules as the pipeline, so data loadi
 
 - Never commit datasets or model binaries; use the Parquet cache and MLflow artifacts.
 - The shared preprocessing module (`ml/common/preprocessing.py`) is the single implementation used by training and serving — keep it in sync.
-- Contract features are the six fields from `FEATURE_LIST_V1.md`; `isFlaggedFraud`, `step`, and account IDs are never features.
+- Contract features are the six fields from `ml/training/docs/feature_list_v1.md` (v1.2); `isFlaggedFraud`, `step`, and account IDs are never features.
 - Feature work must be computable at decision time from the contract fields.

@@ -21,10 +21,11 @@ populations:
     cash_out_app_valid: ml/data/processed/populations/cash_out_app_valid.parquet
 
 protocols:
-  # The served model. Restricted (no new-balance/equality features) and
-  # rule-blind (drop sender_old_balance / evaluate on rule-negative rows) are
-  # added in the next iteration; the runner accepts a `protocol` field.
+  # The three committed protocols; pass one per invocation with
+  # `--protocol` (see ml/README.md). Contract is the served model.
   - contract
+  - restricted
+  - rule_blind
 
 evaluation:
   rule_baseline: true

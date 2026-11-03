@@ -22,7 +22,7 @@ blockers** appeared:
 |---|---|---|
 | `origin/main` | `136bc99` | V2.1 → **V2.2** committed; `docs/conventions.md` rewritten as “V2.2 aligned” |
 | `origin/feat/role5-mlops` | `3734d93` | Merge of main (contract/preprocessing unchanged by the merge) |
-| `feat/role4-paysim-ml-setup` | `7fe90f4` | Merged `origin/main`; now contains V2.2 + new conventions; tests still 31/31 |
+| `feat/role4-paysim-ml-setup` | `7fe90f4` | Merged `origin/main`; now contains V2.2 + new conventions; tests still 34/34 |
 
 The committed V2.2 is byte-identical to the root V2.2
 (`sha256 9670fca…`), so the conception itself did **not** add new decisions

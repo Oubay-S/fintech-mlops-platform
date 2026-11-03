@@ -379,7 +379,7 @@ Until (1)–(3), Role 4 will not claim the serving integration is complete.
 
 | Check | Result |
 |---|---|
-| Role 4 unit/integration tests | **31/31 passed** (`ml/.venv/bin/python -m pytest ml/ -q`) |
+| Role 4 unit/integration tests | **34/34 passed** (`ml/.venv/bin/python -m pytest ml/ -q`) |
 | Role 5 serving suite, **pre-`22d179a`** (14-feature common) | **25/25 passed** |
 | Role 5 serving suite, **current** (`3734d93`, 11-feature tests) | **23/25 passed**; 2 expected failures: 11 vs 14 features |
 | Training→MLflow→FastAPI parity (14-feature common overlaid) | **6/6 cases**, `max |delta| = 0.0` |

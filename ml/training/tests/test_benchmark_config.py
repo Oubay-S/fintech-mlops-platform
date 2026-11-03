@@ -14,6 +14,7 @@ def test_benchmark_config_loads() -> None:
     assert {"lr", "rf", "xgb", "svm", "mlp"} <= set(config["models"])
     assert config["cv"]["folds"] >= 2
     assert len(config["cv"]["seeds"]) >= 1
+    assert set(config["protocols"]) == set(PROTOCOLS)
     assert config["models"]["svm"]["max_train_rows"] > 0
 
 

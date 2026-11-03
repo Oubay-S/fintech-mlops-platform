@@ -29,7 +29,6 @@ from ml.common.preprocessing import build_features
 from ml.common.schema import TARGET
 
 DEFAULT_MODEL = ML_DIR / "data" / "processed" / "final_contract_model.joblib"
-DEFAULT_CONFIG = ML_DIR / "training" / "docs" / "uncertainty_config.json"
 DEFAULT_POPULATION = ML_DIR / "data" / "processed" / "populations" / "app_valid.parquet"
 DEFAULT_OUTPUT = ML_DIR / "visualization" / "data"
 DEFAULT_SAMPLE = 2_000
@@ -115,7 +114,11 @@ def export_method(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default=str(DEFAULT_MODEL))
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG))
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="optional uncertainty config override; defaults to the artifact config",
+    )
     parser.add_argument("--population", default=str(DEFAULT_POPULATION))
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--sample-size", type=int, default=DEFAULT_SAMPLE)
@@ -125,7 +128,10 @@ def main() -> None:
 
     artifact = joblib.load(resolve(args.model))
     pipeline = artifact["pipeline"]
-    config = UncertaintyConfig.from_dict(artifact["config"])
+    if args.config:
+        config = UncertaintyConfig.load(resolve(args.config))
+    else:
+        config = UncertaintyConfig.from_dict(artifact["config"])
     config.validate()
 
     df = pd.read_parquet(resolve(args.population))

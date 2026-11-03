@@ -31,4 +31,4 @@ Use **PaySim** (*Synthetic Financial Datasets For Fraud Detection*) as the proje
 
 - Kaggle: *Synthetic Financial Datasets For Fraud Detection* (`ealaxi/paysim1`).
 - E. A. Lopez-Rojas, A. Elmir, S. Axelsson. *PaySim: A financial mobile money simulator for fraud detection.* EMSS 2016.
-- Detailed profile: `DATASET_PROFILE.md`; contract: `FEATURE_LIST_V1.md`.
+- Detailed profile: `ml/training/docs/eda_report.md`; contract: `ml/training/docs/feature_list_v1.md` (v1.2).
