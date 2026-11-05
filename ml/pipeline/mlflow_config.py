@@ -126,8 +126,25 @@ def load_gate_thresholds(path: str | Path | None = None) -> GateThresholds:
         ) from exc
 
 
+def load_dotenv_if_present(dotenv_path: Path | None = None) -> None:
+    """Load key=value pairs from `.env` into `os.environ` without overwriting existing vars."""
+    env_file = dotenv_path or (REPO_ROOT / ".env")
+    if not env_file.exists() or not env_file.is_file():
+        return
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        k = key.strip()
+        v = value.strip().strip('"').strip("'")
+        if k:
+            os.environ.setdefault(k, v)
+
+
 def resolve_tracking_uri(cli_uri: str | None = None) -> str:
-    """Resolve MLflow tracking URI from CLI argument or `MLFLOW_TRACKING_URI` env var."""
+    """Resolve MLflow tracking URI from CLI argument, `MLFLOW_TRACKING_URI` env var, or `.env`."""
+    load_dotenv_if_present()
     uri = (cli_uri or os.getenv("MLFLOW_TRACKING_URI") or "").strip()
     if not uri:
         return "http://localhost:5000"
