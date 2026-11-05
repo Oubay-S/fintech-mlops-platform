@@ -1,8 +1,7 @@
-# ------------------------------------------------------------------------------
-# FastAPI ML Serving (Python 3.11) — Role 5
+# FastAPI (Python 3.11)
 # Build from repository root:
 #   docker build -f ml/serving/Dockerfile -t ml-serving:dev .
-# ------------------------------------------------------------------------------
+
 FROM python:3.11-slim AS runner
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -33,7 +32,7 @@ USER 1001
 # FastAPI default port
 EXPOSE 8000
 
-# Container-level liveness healthcheck using Python stdlib urllib (no curl required)
+# Container-level liveness healthcheck using Python stdlib urllib
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"]
 
