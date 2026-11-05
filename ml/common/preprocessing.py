@@ -23,8 +23,13 @@ from .schema import (
 
 
 def to_contract_frame(df: pd.DataFrame) -> pd.DataFrame:
-    """Map PaySim columns (or already-mapped contract columns) to the six production contract names."""
-    if all(c in df.columns for c in CONTRACT_FEATURES):
+    """Map PaySim columns to the six contract names, or pass contract frames through.
+
+    Training uses PaySim column names (``oldbalanceOrg``); serving receives the
+    contract names (``sender_old_balance``). The idempotent branch lets both
+    paths share ``build_features`` with zero training-serving skew.
+    """
+    if all(column in df.columns for column in CONTRACT_FEATURES):
         return df[list(CONTRACT_FEATURES)].copy()
     missing = [c for c in PAYSIM_TO_CONTRACT if c not in df.columns]
     if missing:
@@ -52,12 +57,13 @@ def add_derived_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Contract mapping + derived features (model input frame)."""
+    """PaySim columns -> contract names -> derived features (training input frame)."""
     return add_derived_features(to_contract_frame(df))
 
 
-# Alias for backward/forward compatibility with Role 4 training scripts
-build_serving_features = build_features
+def build_serving_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Backward-compatible alias for ``build_features`` on contract-named rows."""
+    return build_features(df)
 
 
 def build_target(df: pd.DataFrame) -> pd.Series:
@@ -67,18 +73,22 @@ def build_target(df: pd.DataFrame) -> pd.Series:
     return df[TARGET].reset_index(drop=True)
 
 
-def build_preprocessor() -> ColumnTransformer:
+def build_preprocessor(numeric_features: list[str] | None = None) -> ColumnTransformer:
     """The single preprocessing object used by training and serving.
 
-    - numeric contract fields + derived features: StandardScaler (9 features)
-    - ``type``: one-hot encoding with explicit 5 PaySim categories
+    - numeric features: StandardScaler (default: all ``NUMERIC_FEATURES``)
+    - ``type``: one-hot encoding
 
-    Scaling is harmless for tree models and required for LR/SVM/MLP, so one
-    transformation keeps the benchmark fair and the serving path identical (14 features total).
+    ``numeric_features`` lets the benchmark build restricted/rule-blind
+    protocols without duplicating the transformation. The default is the full
+    contract model, so training and serving stay on one implementation.
     """
+    numeric = (
+        list(numeric_features) if numeric_features is not None else NUMERIC_FEATURES
+    )
     return ColumnTransformer(
         transformers=[
-            ("num", StandardScaler(), NUMERIC_FEATURES),
+            ("num", StandardScaler(), numeric),
             (
                 "cat",
                 OneHotEncoder(
@@ -100,7 +110,13 @@ def temporal_split(
     test_frac: float = 0.2,
     time_col: str = "step",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Temporal holdout (robustness): train = earlier rows, test = later rows."""
+    """Temporal holdout (robustness): train = earlier rows, test = later rows.
+
+    The cut is placed at a ``step`` boundary: train = steps before the cut,
+    test = steps at/after the cut. This avoids mixing the same hour between
+    the two sets. Because transaction volume is not uniform over time, the
+    row fraction of the test set can differ from ``test_frac``.
+    """
     if not 0 < test_frac < 1:
         raise ValueError("test_frac must be in (0, 1)")
     if time_col not in df.columns:
@@ -124,7 +140,11 @@ def stratified_split(
     test_frac: float = 0.2,
     random_state: int = 42,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Primary split: stratified random train/test split."""
+    """Primary split: stratified random train/test split.
+
+    Keeps the fraud rate stable across the two sets. The temporal holdout
+    (``temporal_split``) is used separately as a robustness check.
+    """
     if not 0 < test_frac < 1:
         raise ValueError("test_frac must be in (0, 1)")
     if TARGET not in df.columns:
@@ -145,7 +165,11 @@ def train_calibration_split(
     cal_frac: float = 0.2,
     random_state: int = 42,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Carve a calibration set out of the training period (stratified)."""
+    """Carve a calibration set out of the training period (stratified).
+
+    The calibration set is used by split conformal prediction. It is drawn
+    from the training period only — never from the test period.
+    """
     if not 0 < cal_frac < 1:
         raise ValueError("cal_frac must be in (0, 1)")
     if TARGET not in train_df.columns:

@@ -1,0 +1,143 @@
+{
+  "schema_version": "1.0",
+  "model": "fraud-detector",
+  "generated_at": "2026-11-01T00:37:33.252757+00:00",
+  "cases": [
+    {
+      "name": "legit_partial_transfer",
+      "request": {
+        "schema_version": "1.0",
+        "request_id": "550e8400-e29b-41d4-a716-446655440001",
+        "features": {
+          "type": "TRANSFER",
+          "amount": 1250.5,
+          "sender_old_balance": 5000.0,
+          "sender_new_balance": 3749.5,
+          "receiver_old_balance": 100.0,
+          "receiver_new_balance": 1350.5
+        }
+      },
+      "expected": {
+        "fraud_probability": 4e-06,
+        "prediction_set": [
+          "legit"
+        ],
+        "action": "ALLOW",
+        "uncertainty_score": 7.5e-05
+      }
+    },
+    {
+      "name": "fraud_full_drain",
+      "request": {
+        "schema_version": "1.0",
+        "request_id": "550e8400-e29b-41d4-a716-446655440002",
+        "features": {
+          "type": "TRANSFER",
+          "amount": 250000.0,
+          "sender_old_balance": 250000.0,
+          "sender_new_balance": 0.0,
+          "receiver_old_balance": 0.0,
+          "receiver_new_balance": 250000.0
+        }
+      },
+      "expected": {
+        "fraud_probability": 0.999997,
+        "prediction_set": [
+          "fraud"
+        ],
+        "action": "BLOCK",
+        "uncertainty_score": 6.3e-05
+      }
+    },
+    {
+      "name": "high_amount_legit",
+      "request": {
+        "schema_version": "1.0",
+        "request_id": "550e8400-e29b-41d4-a716-446655440003",
+        "features": {
+          "type": "TRANSFER",
+          "amount": 600000.0,
+          "sender_old_balance": 1000000.0,
+          "sender_new_balance": 400000.0,
+          "receiver_old_balance": 0.0,
+          "receiver_new_balance": 600000.0
+        }
+      },
+      "expected": {
+        "fraud_probability": 5.7e-05,
+        "prediction_set": [],
+        "action": "HUMAN_REVIEW",
+        "uncertainty_score": 0.85
+      }
+    },
+    {
+      "name": "cash_out_withdrawal",
+      "request": {
+        "schema_version": "1.0",
+        "request_id": "550e8400-e29b-41d4-a716-446655440004",
+        "features": {
+          "type": "CASH_OUT",
+          "amount": 45000.0,
+          "sender_old_balance": 52000.0,
+          "sender_new_balance": 7000.0,
+          "receiver_old_balance": 120000.0,
+          "receiver_new_balance": 165000.0
+        }
+      },
+      "expected": {
+        "fraud_probability": 5e-06,
+        "prediction_set": [
+          "legit"
+        ],
+        "action": "ALLOW",
+        "uncertainty_score": 9.6e-05
+      }
+    },
+    {
+      "name": "fraud_full_drain_1m",
+      "request": {
+        "schema_version": "1.0",
+        "request_id": "550e8400-e29b-41d4-a716-446655440005",
+        "features": {
+          "type": "TRANSFER",
+          "amount": 1000000.0,
+          "sender_old_balance": 1000000.0,
+          "sender_new_balance": 0.0,
+          "receiver_old_balance": 0.0,
+          "receiver_new_balance": 1000000.0
+        }
+      },
+      "expected": {
+        "fraud_probability": 0.999998,
+        "prediction_set": [
+          "fraud"
+        ],
+        "action": "BLOCK",
+        "uncertainty_score": 3.2e-05
+      }
+    },
+    {
+      "name": "small_partial_transfer",
+      "request": {
+        "schema_version": "1.0",
+        "request_id": "550e8400-e29b-41d4-a716-446655440006",
+        "features": {
+          "type": "TRANSFER",
+          "amount": 100.0,
+          "sender_old_balance": 1000.0,
+          "sender_new_balance": 900.0,
+          "receiver_old_balance": 0.0,
+          "receiver_new_balance": 100.0
+        }
+      },
+      "expected": {
+        "fraud_probability": 5e-06,
+        "prediction_set": [
+          "legit"
+        ],
+        "action": "ALLOW",
+        "uncertainty_score": 0.0001
+      }
+    }
+  ]
+}

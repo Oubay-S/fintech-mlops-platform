@@ -1,0 +1,20 @@
+[
+  {
+    "population": "in_scope_sample_1m",
+    "rows": 1000000,
+    "frauds": 2965,
+    "fraud_rate": 0.002965,
+    "rule": {
+      "rows": 1000000,
+      "frauds": 2965,
+      "selected": 2904,
+      "tp": 2904,
+      "fp": 0,
+      "fn": 61,
+      "tn": 997035,
+      "precision": 1.0,
+      "recall": 0.9794266441821248,
+      "f1": 0.9896064065428524
+    }
+  }
+]

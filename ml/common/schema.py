@@ -49,6 +49,10 @@ DERIVED_FEATURES = [
 FEATURE_COLUMNS = CONTRACT_FEATURES + DERIVED_FEATURES
 TARGET = "isFraud"
 
+# All five PaySim transaction types, in the canonical one-hot order used by
+# ML Serving's golden feature signature (14 transformed columns).
+TRANSACTION_TYPES = ["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"]
+
 # Model-input groups (after contract mapping + derived features).
 NUMERIC_FEATURES = [
     "amount",
@@ -58,10 +62,6 @@ NUMERIC_FEATURES = [
     "receiver_new_balance",
 ] + DERIVED_FEATURES
 CATEGORICAL_FEATURES = ["type"]
-
-# Canonical order of categories for OneHotEncoder so feature names are deterministic
-# even when fitted on a subset of transaction types (14 transformed features signature).
-TRANSACTION_TYPES = ["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"]
 
 # Columns that must never enter the feature matrix (leakage / identifiers / non-contract).
 FORBIDDEN_FEATURES = ["isFlaggedFraud", "step", "nameOrig", "nameDest"]
