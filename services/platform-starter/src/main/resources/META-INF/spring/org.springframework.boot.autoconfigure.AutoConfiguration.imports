@@ -1,0 +1,3 @@
+org.springframework.boot.autoconfigure.AutoConfiguration.imports=\
+com.fintech.platform.PlatformStarterAutoConfiguration
+
