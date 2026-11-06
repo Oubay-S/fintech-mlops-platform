@@ -49,10 +49,9 @@ from ml.common.artifact_contract import (
     UncertaintyConfig,
     compute_uncertainty_sha256,
 )
-from ml.common.paths import REPO_ROOT
 from ml.common.preprocessing import build_features, build_preprocessor
 from ml.common.schema import TRANSACTION_TYPES
-from ml.pipeline.mlflow_config import get_git_sha, resolve_tracking_uri
+from ml.pipeline.mlflow_config import REPO_ROOT, get_git_sha, resolve_tracking_uri
 
 BENCHMARK_CSV_PATH = REPO_ROOT / "ml" / "training" / "results" / "benchmark_runs.csv"
 STATISTICS_JSON_PATH = (

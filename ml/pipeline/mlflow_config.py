@@ -26,7 +26,8 @@ from ml.common.artifact_contract import (
     UNCERTAINTY_SHA256_TAG,
     compute_uncertainty_sha256,
 )
-from ml.common.paths import REPO_ROOT
+
+REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------------------
 # Standardized CLI Exit Codes (POSIX / CI-CD Contract)

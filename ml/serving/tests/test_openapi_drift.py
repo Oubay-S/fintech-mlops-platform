@@ -11,9 +11,10 @@ Verifies:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import yaml
 
-from ml.common.paths import REPO_ROOT
 from ml.serving.config import ServingSettings
 from ml.serving.main import create_app
 from ml.serving.schemas import (
@@ -22,6 +23,7 @@ from ml.serving.schemas import (
     PredictResponse,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
 OPENAPI_YAML_PATH = REPO_ROOT / "docs" / "api" / "ml-predict-openapi.yaml"
 
 

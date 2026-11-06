@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ml.common.artifact_contract import PRODUCTION_ALIAS, REGISTERED_MODEL_NAME
-from ml.common.paths import ML_DIR
+
+ML_DIR: Path = Path(__file__).resolve().parents[1]
 
 
 def _env_float(name: str, default: float) -> float:
