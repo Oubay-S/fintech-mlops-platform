@@ -4,7 +4,7 @@
 
 **Document purpose.** This document defines the technical conception of the **application layer** of the High-Availability MLOps FinTech Platform: architecture, data design, API contracts, security, and system behaviour. It is the shared reference for all team members and should be read before writing code. DevOps/MLOps, ML Training and ML Serving appear only through **interface contracts** (section 24).
 
-**Version:** 2.2, 28 October 2026.
+**Version:** 2.3, 5 November 2026.
 **Dataset:** the primary dataset is **PaySim** (confirmed). Feature names in section 17 depend on it.
 
 ---
@@ -567,7 +567,7 @@ Load tests must be able to relax these limits through configuration.
 This section specifies correctness. Backend and Frontend must both read it.
 
 ### 11.1 Money and identifiers
-- Amounts: `DECIMAL(19,2)`, `BigDecimal` in Java, **string in JSON** (`"125.50"`). Never floating point.
+- Amounts: `DECIMAL(19,2)`, `BigDecimal` in Java, **JSON numbers** with at most 2 decimals (`125.50`). Java code never uses `double` or `float` for money: Jackson reads and writes amounts as `BigDecimal` (plain notation, 2 decimals). Requests with more than 2 decimals, or an amount above `app.transfer.max-amount`, return `400 VALIDATION_FAILED`.
 - One simulated currency, configured globally (`app.currency`).
 - IDs: UUID. Timestamps: ISO-8601 UTC.
 
@@ -577,7 +577,7 @@ This section specifies correctness. Backend and Frontend must both read it.
 |---|---|
 | Wallet | One per **customer or cash agent** (none for staff). Fields: `balance`, `held_amount`, `owner_status`, `owner_kind`, `owner_display_name`. `available = balance − held_amount`. |
 | Initial balance | Created on `UserRegistered` with a `TOPUP` ledger entry of `app.wallet.initial-balance` (default 1,000,000.00 for customers, 0 for cash agents). Idempotent by user ID. |
-| Amount scale | Simulated currency at PaySim magnitudes: initial balance 1,000,000.00, `app.transfer.max-amount` 10,000,000.00, and a **provisional** R5 threshold of 500,000.00 to be validated by ML Training. All are configuration properties. |
+| Amount scale | Simulated currency at PaySim magnitudes: initial balance 1,000,000.00, `app.transfer.max-amount` 10,000,000.00. All are configuration properties. |
 | Ledger | **Append-only.** Entry types: `TOPUP`, `HOLD`, `RELEASE`, `DEBIT`, `CREDIT`. Each entry records amount, `balance_after`, `held_after`. No updates, no deletes. |
 | Invariant I1 | `balance` = Σ(TOPUP + CREDIT − DEBIT) of the wallet's ledger |
 | Invariant I2 | `held_amount` = Σ(HOLD − RELEASE) of the wallet's ledger |
@@ -688,21 +688,21 @@ Rules are evaluated **in order**; the first match wins. `policy_version` is stor
 | Order | Condition | Decision | Reason code |
 |---|---|---|---|
 | R1 | Sender or receiver not `ACTIVE` | `REJECTED` | `ACCOUNT_RESTRICTED` |
-| R1b | Type not supported by the application (defensive, no ML call) and amount ≥ `risk.policy.high-amount-threshold` | `PENDING_REVIEW` | `AMOUNT_HIGH` |
+| R1b | Type not supported by the application (defensive, no ML call) and `amount ÷ sender_old_balance ≥ risk.policy.review-balance-ratio` | `PENDING_REVIEW` | `BALANCE_RATIO_HIGH` |
 | R1b | Type not supported by the application (defensive, no ML call) | `APPROVED` | `TYPE_NOT_SCORED` |
 | R2 | ML unavailable, timeout, circuit open, or invalid response | `PENDING_REVIEW`, `degraded=true` | `SERVICE_DEGRADED` |
 | R3 | Prediction set = {fraud} | `REJECTED` | `MODEL_HIGH_RISK` |
 | R4 | Prediction set = {legit, fraud} or empty | `PENDING_REVIEW` | `MODEL_UNCERTAIN` |
-| R5 | Prediction set = {legit} and amount ≥ `risk.policy.high-amount-threshold` | `PENDING_REVIEW` | `AMOUNT_HIGH` |
+| R5 | Prediction set = {legit} and `amount ÷ sender_old_balance ≥ risk.policy.review-balance-ratio` | `PENDING_REVIEW` | `BALANCE_RATIO_HIGH` |
 | R6 | Prediction set = {legit} | `APPROVED` | none |
 
 R1b is a **defensive rule**: the application only creates `TRANSFER` and `CASH_OUT`, so it normally never fires.
 
-**High-amount rule (R5).** Every transfer is scored by the model first. If the model is confident the transaction is legitimate but the amount is at or above `risk.policy.high-amount-threshold`, the transfer still goes to human review (`AMOUNT_HIGH`): a very large amount is not worth the risk of automatic approval. A `{fraud}` result is still rejected (R3) and an uncertain result still goes to review (R4). The threshold is provisional (500,000.00) and ML Training validates it against the in-scope amount distribution, so that it sends a controlled share of traffic to review. These cases are **rule-driven, not model-driven**, and the report must say so. They also guarantee that the analyst queue is exercised even when the model is very sharp. Load tests must include a controlled share of above-threshold amounts, otherwise the queue is never exercised or grows without bound.
+**Near-drain rule (R5).** Every transfer is scored by the model first. If the model is confident the transaction is legitimate but the transfer takes a large share of the sender's balance (`amount ÷ sender_old_balance ≥ risk.policy.review-balance-ratio`, default 0.8), the transfer still goes to human review (`BALANCE_RATIO_HIGH`). A full drain is already rejected by R3, and an uncertain result already goes to review (R4), so R5 only catches transfers of roughly 80–99% of the balance that the model approves. The ratio uses the same `sender_old_balance` that the model receives, so Risk needs no extra call. The property is optional: if it is unset, the rule is off. It flags unusual behaviour for the account, not exposure, so the report must call it a near-drain rule. These cases are **rule-driven, not model-driven**, and the report must say so. They also guarantee that the analyst queue is exercised even when the model is very sharp. Because the ratio depends on wallet state, the review rate rises as a wallet empties: Locust amounts must be defined as a **distribution of ratios** (most well below 30%, a small share above the threshold) and wallets topped up between scenarios, otherwise the queue floods.
 
 ML Serving may return an `action` field. It is treated as a **suggestion only**. The Risk service owns the final decision.
 
-**Overload behaviour (Should).** While ML is degraded, review cases are prioritised (large amounts first). If open cases exceed `risk.review.max-open`, new transfers are refused with `503 TEMPORARILY_UNAVAILABLE` and `Retry-After`, **before** funds are held.
+**Overload behaviour (Should).** While ML is degraded, review cases are prioritised (highest balance ratios first). If open cases exceed `risk.review.max-open`, new transfers are refused with `503 TEMPORARILY_UNAVAILABLE` and `Retry-After`, **before** funds are held.
 
 #### Messages shown to the customer
 
@@ -1521,6 +1521,7 @@ Feature names above are the **PaySim v0**. The `type` field uses the five PaySim
 ```json
 {
   "schema_version": "1.0",
+  "request_id": "uuid",
   "action": "HUMAN_REVIEW",
   "fraud_probability": 0.0132,
   "uncertainty": {
@@ -1529,12 +1530,13 @@ Feature names above are the **PaySim v0**. The `type` field uses the five PaySim
     "prediction_set": ["legit"],
     "score": 0.08
   },
-  "model": { "name": "fraud-xgb", "version": "7", "stage": "Production" },
+  "model": { "name": "fraud-detector", "version": "7", "stage": "Production" },
   "explanations": [ { "feature": "amount", "contribution": 0.31 } ],
   "inference_ms": 7.4
 }
 ```
 
+- `request_id` is echoed unchanged from the request, so that Risk can match each response to its call and logs can be correlated across services.
 - `prediction_set` ⊆ {`legit`, `fraud`}; it may be empty or contain both.
 - `uncertainty.score` ∈ [0, 1] is a scalar for dashboards and alerts. Its definition is owned by ML Serving.
 - `action` (`ALLOW`, `BLOCK`, `HUMAN_REVIEW`) is a **suggestion**. The Risk policy (section 11.7) decides.
@@ -1550,7 +1552,7 @@ Feature names above are the **PaySim v0**. The `type` field uses the five PaySim
 | Circuit breaker | Window of 20 calls, opens at 50% failures or 50% slow calls (> 1 s), half-open after 10 s with 3 trial calls |
 | Bulkhead | Max 25 concurrent ML calls per Risk replica |
 | Fallback | Rule R2: `PENDING_REVIEW`, `degraded=true` |
-| Response validation | Unknown major `schema_version`, missing fields, probability outside [0, 1] → treated as failure (R2) |
+| Response validation | Unknown major `schema_version`, missing fields, missing or mismatched `request_id`, probability outside [0, 1] → treated as failure (R2) |
 
 ### 17.4 Latency budget for `POST /transfers`
 
@@ -1624,7 +1626,7 @@ Errors follow RFC 7807 (`application/problem+json`):
 
 ### 19.2 Standard success responses
 
-Single resources return the resource directly. Lists use the pagination envelope in section 16.8. Money is always a string.
+Single resources return the resource directly. Lists use the pagination envelope in section 16.8. Money is always a JSON number with at most 2 decimals.
 
 ### 19.3 HTTP status code reference
 
@@ -1867,7 +1869,7 @@ React + TypeScript (strict) + Vite · MUI · TanStack Query · React Router · r
 - **Role-based route guards** (UX only, the backend enforces).
 - Access token in memory, silent refresh on page load, a single in-flight refresh promise, retry once on 401.
 - One `Idempotency-Key` per form submission, created when the form opens, kept on retry, regenerated after success.
-- Amounts handled as strings or a decimal helper, never floating-point arithmetic.
+- Amounts arrive as JSON numbers. Do arithmetic and comparisons on integer cents or with a decimal helper, never on raw floating-point values, and format with two decimals for display.
 - Every asynchronous screen has loading, empty, error and **degraded** states.
 - Polling: notification badge every 20 s, review queue every 15 s, request detail while `PROCESSING` every 10 s, incoming pending requests every 5 s (pop-up).
 - **MSW mocks generated from the OpenAPI specs** let the frontend build every screen before the backend is ready.
@@ -1902,7 +1904,7 @@ React + TypeScript (strict) + Vite · MUI · TanStack Query · React Router · r
 | Tab | Content | Data source |
 |---|---|---|
 | Embeddings | Scatter of PCA, t-SNE or UMAP (method toggle), colour by class, **errors highlighted**, toggle for uncertain points, tooltip with features | `GET /risk/viz/{method}` |
-| Live decisions | Distribution of Approved/Review/Rejected, review rate over time split by reason (uncertain, high amount, degraded), degraded ratio | `GET /risk/stats` |
+| Live decisions | Distribution of Approved/Review/Rejected, review rate over time split by reason (uncertain, near-drain, degraded), degraded ratio | `GET /risk/stats` |
 | Model | Model name, version, metrics summary, conformal confidence level | `GET /risk/model-info` |
 
 Embeddings are **precomputed offline** (a sample of roughly 5,000–10,000 points) and served as static JSON. Nothing is computed per request.
@@ -1952,7 +1954,7 @@ Custom metrics (names are a contract with the dashboards):
 | `fintech_notifications_sent_total` | counter | `channel`, `outcome` | Notification |
 | `fintech_audit_events_total` | counter | `action` | Audit |
 
-Derived signals (PromQL, owned by DevOps/MLOps): uncertain ratio (decisions with reason `MODEL_UNCERTAIN` over all scored decisions, excluding `AMOUNT_HIGH` and `SERVICE_DEGRADED`), which drives the "ML uncertainty high" alert; degraded ratio; review queue age; outbox backlog.
+Derived signals (PromQL, owned by DevOps/MLOps): uncertain ratio (decisions with reason `MODEL_UNCERTAIN` over all scored decisions, excluding `BALANCE_RATIO_HIGH` and `SERVICE_DEGRADED`), which drives the "ML uncertainty high" alert; degraded ratio; review queue age; outbox backlog.
 
 ### 22.3 Logs
 
@@ -1974,7 +1976,7 @@ JSON on stdout with `timestamp`, `level`, `service`, `correlationId`, `userId` (
 
 **Mandatory concurrency test:** 50 parallel transfers among 3 wallets, then assert I1–I3 and `balance ≥ 0`.
 **Coverage target:** at least 70% on the domain packages of `transaction` and `risk` (SonarQube gate), not a global percentage.
-**Outcome triggers for demos and E2E tests** (to confirm with the stub first, then with the real model): `APPROVED` is a partial transfer below the R5 threshold; `REJECTED` is a transfer of the whole balance to a new receiver (the drain pattern); `PENDING_REVIEW` is a transfer at or above the R5 threshold that the model approves, or any transfer while the ML stub is stopped (R2).
+**Outcome triggers for demos and E2E tests** (to confirm with the stub first, then with the real model): `APPROVED` is a transfer well below 80% of the sender's balance; `REJECTED` is a transfer of the whole balance to a new receiver (the drain pattern); `PENDING_REVIEW` is a transfer of about 85% of the balance that the model approves, or any transfer while the ML stub is stopped (R2).
 **Test utilities:** a small ML stub service that mimics the `/predict` contract, a seed tool, and a simulator that replays PaySim-like traffic through the **public API** (never directly into the databases).
 
 ---
@@ -2019,8 +2021,8 @@ This section states what the application **needs from** and **provides to** each
 | The decision policy (section 11.7) so evaluation can be done at the **decision** level, not only per sample | The conformal prediction-set definition (confidence level and calibration set) |
 | The review-rate metric as a first-class target | A **target review rate** recommendation (for example no more than 5% of traffic): an unusable review queue invalidates the system |
 | | Visualisation artifacts: JSON for PCA, t-SNE, UMAP (about 5,000–10,000 sampled points with coordinates, true label, predicted label, uncertainty flag, a few feature values) |
-| | Validation of the high-amount threshold used by rule R5 against the in-scope amount distribution (a small, controlled share of traffic goes to review) |
-| | The model-driven review rate (reason `MODEL_UNCERTAIN`) reported separately from rule-driven reviews (`AMOUNT_HIGH`) |
+| | Validation of the balance-ratio threshold used by rule R5 (default 0.8) against the in-scope ratio distribution, so that a small, controlled share of traffic goes to review |
+| | The model-driven review rate (reason `MODEL_UNCERTAIN`) reported separately from rule-driven reviews (`BALANCE_RATIO_HIGH`) |
 | | Locust scenarios: normal, high, overload, recovery |
 | | **Primary metrics reported on the `TRANSFER` + `CASH_OUT` subset** (the traffic the application serves), with all-types results as secondary. The decision to keep the other types is explained in the report. |
 | | Conformal calibration on the in-scope subset, or per type, so the coverage guarantee matches served traffic (in addition to the class-conditional calibration below) |
