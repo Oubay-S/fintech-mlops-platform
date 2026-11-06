@@ -5,12 +5,12 @@ environment variables or `.env`) to:
 1. Ensure the `paysim-fraud-benchmark` experiment exists.
 2. Log the 4 comparison models (`lr`, `rf`, `svm`, `mlp`) from
    `ml/training/results/benchmark_runs.csv`.
-3. Log the Champion XGBoost model with:
-   - 14-column contract Pipeline (loaded from disk if present or calibrated
-     against `ml/training/package/parity_cases.json`)
+3. Strictly load the real PaySim-trained Champion XGBoost model from
+   `ml/data/processed/final_contract_model.joblib` and log it with:
+   - 14-column contract Pipeline (`preprocessor` + `classifier`)
    - `uncertainty_config.json`
    - `statistical_validation.json` (Friedman & Wilcoxon/Holm results)
-   - Mandatory tags (`data_source=paysim`, `uncertainty_config_sha256`,
+   - Mandatory tags (`data_source`, `uncertainty_config_sha256`,
      `algorithm=xgboost`, dynamic `git_sha`)
 4. Register the model under `fraud-detector` with the `@candidate` alias.
 """
@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import sys
 import tempfile
@@ -33,11 +32,9 @@ os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 import joblib
 import mlflow
 import mlflow.sklearn
-import numpy as np
 import pandas as pd
 from mlflow.tracking import MlflowClient
 from sklearn.pipeline import Pipeline
-from xgboost import XGBClassifier
 
 from ml.common.artifact_contract import (
     CANDIDATE_ALIAS,
@@ -49,9 +46,14 @@ from ml.common.artifact_contract import (
     UncertaintyConfig,
     compute_uncertainty_sha256,
 )
-from ml.common.preprocessing import build_features, build_preprocessor
-from ml.common.schema import TRANSACTION_TYPES
-from ml.pipeline.mlflow_config import REPO_ROOT, get_git_sha, resolve_tracking_uri
+from ml.pipeline.mlflow_config import (
+    EXIT_INFRA_ERROR,
+    EXIT_SUCCESS,
+    REPO_ROOT,
+    PipelineInfraError,
+    get_git_sha,
+    resolve_tracking_uri,
+)
 
 BENCHMARK_CSV_PATH = REPO_ROOT / "ml" / "training" / "results" / "benchmark_runs.csv"
 STATISTICS_JSON_PATH = (
@@ -60,110 +62,91 @@ STATISTICS_JSON_PATH = (
 UNCERTAINTY_JSON_PATH = (
     REPO_ROOT / "ml" / "training" / "package" / "uncertainty_config.json"
 )
-PARITY_JSON_PATH = REPO_ROOT / "ml" / "training" / "package" / "parity_cases.json"
 LOCAL_MODEL_PATH = (
     REPO_ROOT / "ml" / "data" / "processed" / "final_contract_model.joblib"
 )
 
+REQUIRED_CHAMPION_METRICS: tuple[str, ...] = (
+    "roc_auc",
+    "pr_auc",
+    "f1",
+    "precision",
+    "recall",
+    "mcc",
+    "brier_score",
+    "coverage_legit",
+    "coverage_fraud",
+    "expected_review_rate",
+    "inference_p95_ms",
+)
 
-def _invert_binary_entropy(target_entropy: float, *, high_side: bool = False) -> float:
-    """Invert binary entropy H_2(p) = target_entropy to recover unrounded probability p."""
-    lo, hi = 1e-12, 0.5
-    for _ in range(60):
-        mid = 0.5 * (lo + hi)
-        h_val = -(mid * math.log2(mid) + (1.0 - mid) * math.log2(1.0 - mid))
-        if h_val < target_entropy:
-            lo = mid
-        else:
-            hi = mid
-    return (1.0 - lo) if high_side else lo
 
-
-def build_champion_pipeline(
-    parity_path: Path = PARITY_JSON_PATH,
+def load_champion_pipeline(
     local_model_path: Path = LOCAL_MODEL_PATH,
 ) -> Pipeline:
-    """Load local trained pipeline if available, or build parity-calibrated 14-column pipeline."""
-    if local_model_path.exists():
-        loaded = joblib.load(local_model_path)
-        if isinstance(loaded, Pipeline):
-            return loaded
+    """Strictly load the real PaySim-trained Champion Pipeline from disk.
 
-    payload = json.loads(parity_path.read_text(encoding="utf-8"))
-    cases = payload.get("cases", [])
-
-    rows: list[dict[str, object]] = []
-    labels: list[int] = []
-    weights: list[float] = []
-
-    for case in cases:
-        features = dict(case["request"]["features"])
-        expected = case["expected"]
-        p_exp = float(expected["fraud_probability"])
-        s_exp = float(expected["uncertainty_score"])
-        p_target = (
-            p_exp
-            if expected.get("prediction_set") == []
-            else _invert_binary_entropy(s_exp, high_side=(p_exp > 0.5))
+    Raises `PipelineInfraError` if the `.joblib` file does not exist or does
+    not contain a valid scikit-learn `Pipeline`. Never builds a surrogate or
+    fallback model.
+    """
+    if not local_model_path.exists():
+        raise PipelineInfraError(
+            f"Real trained model not found at '{local_model_path}'. "
+            "No surrogate or fallback model is permitted. "
+            "Run 'python -m ml.pipeline.fetch_model' to download and verify the "
+            "official release model artifact into 'ml/data/processed/'."
         )
-        rows.append(features)
-        labels.append(1)
-        weights.append(p_target * 1_000_000.0)
-        rows.append(features)
-        labels.append(0)
-        weights.append((1.0 - p_target) * 1_000_000.0)
 
-    # Ensure all 5 contract transaction types are represented during fit
-    covered_types = {str(r["type"]) for r in rows}
-    for tx_type in TRANSACTION_TYPES:
-        if tx_type not in covered_types:
-            base_row = {
-                "type": tx_type,
-                "amount": 200.0,
-                "sender_old_balance": 5000.0,
-                "sender_new_balance": 4800.0,
-                "receiver_old_balance": 100.0,
-                "receiver_new_balance": 300.0,
-            }
-            rows.append(base_row)
-            labels.append(1)
-            weights.append(4.0)
-            rows.append(base_row)
-            labels.append(0)
-            weights.append(999_996.0)
+    try:
+        loaded = joblib.load(local_model_path)
+    except Exception as exc:
+        raise PipelineInfraError(
+            f"Failed to deserialize model artifact at '{local_model_path}': {exc}"
+        ) from exc
 
-    features_df = build_features(pd.DataFrame(rows))
-    pipeline = Pipeline(
-        steps=[
-            ("preprocessor", build_preprocessor()),
-            (
-                "classifier",
-                XGBClassifier(
-                    n_estimators=400,
-                    max_depth=6,
-                    learning_rate=0.2,
-                    min_child_weight=0.0,
-                    reg_lambda=0.0,
-                    random_state=42,
-                    eval_metric="logloss",
-                ),
-            ),
-        ]
-    )
-    pipeline.fit(
-        features_df,
-        np.asarray(labels, dtype=np.int32),
-        classifier__sample_weight=np.asarray(weights, dtype=np.float64),
-    )
+    if isinstance(loaded, dict) and isinstance(loaded.get("pipeline"), Pipeline):
+        pipeline: Pipeline = loaded["pipeline"]
+    elif isinstance(loaded, Pipeline):
+        pipeline = loaded
+    else:
+        raise PipelineInfraError(
+            f"Invalid model structure in '{local_model_path}': expected a "
+            "scikit-learn Pipeline or dict with key 'pipeline', got "
+            f"{type(loaded).__name__}."
+        )
+
+    if (
+        "preprocessor" not in pipeline.named_steps
+        or "classifier" not in pipeline.named_steps
+    ):
+        raise PipelineInfraError(
+            f"Pipeline in '{local_model_path}' is missing required steps "
+            f"('preprocessor', 'classifier'); found {list(pipeline.named_steps.keys())}."
+        )
+
     return pipeline
 
 
 def _extract_benchmark_metrics(df: pd.DataFrame, model_code: str) -> dict[str, float]:
-    """Compute mean cross-validation metrics for `model_code` under contract protocol."""
-    contract_df = df[df["protocol"] == "contract"] if "protocol" in df.columns else df
+    """Compute genuine mean cross-validation metrics for `model_code` under contract protocol.
+
+    Strictly reads columns from `benchmark_runs.csv` without fabricating any
+    missing metrics. Raises `PipelineInfraError` if `model_code` has no rows.
+    """
+    if "protocol" not in df.columns or "model" not in df.columns:
+        raise PipelineInfraError(
+            f"'{BENCHMARK_CSV_PATH}' is missing required 'protocol' or 'model' columns."
+        )
+
+    contract_df = df[df["protocol"] == "contract"]
     m_df = contract_df[contract_df["model"] == model_code]
     if m_df.empty:
-        return {}
+        raise PipelineInfraError(
+            f"No benchmark rows found for model='{model_code}' with protocol='contract' "
+            f"in '{BENCHMARK_CSV_PATH}'."
+        )
+
     means = m_df.mean(numeric_only=True).to_dict()
     metrics: dict[str, float] = {}
     metric_map = {
@@ -175,19 +158,97 @@ def _extract_benchmark_metrics(df: pd.DataFrame, model_code: str) -> dict[str, f
         "mcc": "mcc",
         "brier": "brier_score",
         "brier_score": "brier_score",
+        "fit_sec": "fit_sec",
+        "predict_ms_per_row": "predict_ms_per_row",
     }
     for src_col, dst_metric in metric_map.items():
         if src_col in means and not pd.isna(means[src_col]):
             metrics[dst_metric] = float(means[src_col])
-    if "predict_ms_per_row" in means and not pd.isna(means["predict_ms_per_row"]):
-        metrics.setdefault(
-            "inference_p95_ms", float(means["predict_ms_per_row"]) * 1000.0
+
+    required_benchmark_cols = (
+        "roc_auc",
+        "pr_auc",
+        "f1",
+        "precision",
+        "recall",
+        "mcc",
+        "brier_score",
+    )
+    missing = [col for col in required_benchmark_cols if col not in metrics]
+    if missing:
+        raise PipelineInfraError(
+            f"Benchmark model '{model_code}' in '{BENCHMARK_CSV_PATH}' is missing "
+            f"required metric columns: {missing}."
         )
     return metrics
 
 
-def populate(tracking_uri: str | None = None) -> None:
+def _extract_champion_metrics(cfg_dict: dict[str, object]) -> dict[str, float]:
+    """Strictly extract verified Champion metrics from `uncertainty_config.json`.
+
+    Raises `PipelineInfraError` if `metrics_summary` or any mandatory metric is missing.
+    """
+    summary = cfg_dict.get("metrics_summary")
+    if not isinstance(summary, dict):
+        raise PipelineInfraError(
+            f"'{UNCERTAINTY_JSON_PATH}' is missing a valid 'metrics_summary' object."
+        )
+
+    missing = [
+        key
+        for key in REQUIRED_CHAMPION_METRICS
+        if key not in summary
+        or not isinstance(summary[key], (int, float))
+        or pd.isna(summary[key])
+    ]
+    if missing:
+        raise PipelineInfraError(
+            f"'{UNCERTAINTY_JSON_PATH}' metrics_summary is missing required numeric "
+            f"metrics: {missing}. Refusing to fabricate or fallback metrics."
+        )
+
+    return {
+        key: float(val)
+        for key, val in summary.items()
+        if isinstance(val, (int, float)) and not pd.isna(val)
+    }
+
+
+def populate(
+    tracking_uri: str | None = None,
+    local_model_path: Path = LOCAL_MODEL_PATH,
+) -> None:
     """Populate benchmark runs and register the `@candidate` champion model in MLflow."""
+    for required_file in (
+        BENCHMARK_CSV_PATH,
+        UNCERTAINTY_JSON_PATH,
+        STATISTICS_JSON_PATH,
+    ):
+        if not required_file.exists():
+            raise PipelineInfraError(
+                f"Required training artifact not found: '{required_file}'."
+            )
+
+    # Validate the real trained model and artifacts BEFORE modifying MLflow state
+    pipeline = load_champion_pipeline(local_model_path=local_model_path)
+    df = pd.read_csv(BENCHMARK_CSV_PATH)
+    benchmark_runs_metrics = {
+        model_name: _extract_benchmark_metrics(df, model_name)
+        for model_name in ("lr", "rf", "svm", "mlp")
+    }
+    _extract_benchmark_metrics(df, "xgb")
+
+    cfg_dict = json.loads(UNCERTAINTY_JSON_PATH.read_text(encoding="utf-8"))
+    uncertainty_config = UncertaintyConfig.from_dict(cfg_dict)
+    cfg_sha256 = compute_uncertainty_sha256(uncertainty_config)
+    champion_metrics = _extract_champion_metrics(cfg_dict)
+
+    dataset_version = cfg_dict.get("dataset_version")
+    if not isinstance(dataset_version, str) or not dataset_version.strip():
+        raise PipelineInfraError(
+            f"'{UNCERTAINTY_JSON_PATH}' is missing required non-empty 'dataset_version'."
+        )
+
     resolved_uri = resolve_tracking_uri(tracking_uri)
     mlflow.set_tracking_uri(resolved_uri)
     client = MlflowClient(tracking_uri=resolved_uri)
@@ -206,11 +267,7 @@ def populate(tracking_uri: str | None = None) -> None:
                 pass
 
     # 1. Log benchmark runs from benchmark_runs.csv
-    df = pd.read_csv(BENCHMARK_CSV_PATH)
-    for model_name in ("lr", "rf", "svm", "mlp"):
-        mean_metrics = _extract_benchmark_metrics(df, model_name)
-        if not mean_metrics:
-            continue
+    for model_name, mean_metrics in benchmark_runs_metrics.items():
         with mlflow.start_run(experiment_id=exp_id, run_name=f"benchmark-{model_name}"):
             mlflow.log_param("algorithm", model_name)
             mlflow.log_param("protocol", "contract")
@@ -219,42 +276,17 @@ def populate(tracking_uri: str | None = None) -> None:
                 mlflow.log_metric(k, float(v))
         print(f"Logged benchmark run for algorithm: {model_name}")
 
-    # 2. Load contract artifacts & extract Champion XGBoost metrics dynamically
-    cfg_dict = json.loads(UNCERTAINTY_JSON_PATH.read_text(encoding="utf-8"))
-    uncertainty_config = UncertaintyConfig.from_dict(cfg_dict)
-    cfg_sha256 = compute_uncertainty_sha256(uncertainty_config)
-
-    champion_metrics = _extract_benchmark_metrics(df, "xgb")
-    summary_from_cfg = cfg_dict.get("metrics_summary", {})
-    if isinstance(summary_from_cfg, dict):
-        for key in (
-            "roc_auc",
-            "pr_auc",
-            "f1",
-            "precision",
-            "recall",
-            "mcc",
-            "brier_score",
-            "expected_review_rate",
-            "inference_p95_ms",
-        ):
-            if key in summary_from_cfg and isinstance(
-                summary_from_cfg[key], (int, float)
-            ):
-                champion_metrics[key] = float(summary_from_cfg[key])
-
+    # 2. Log the real PaySim-trained Champion XGBoost model and contract artifacts
     champion_tags = {
         "algorithm": "xgboost",
-        DATA_SOURCE_TAG: str(cfg_dict.get("dataset_version", "paysim")),
+        DATA_SOURCE_TAG: dataset_version,
         UNCERTAINTY_SHA256_TAG: cfg_sha256,
-        "dataset_version": str(cfg_dict.get("dataset_version", "paysim")),
+        "dataset_version": dataset_version,
         "git_sha": get_git_sha(),
         "seed": "42",
         "conformal_method": str(uncertainty_config.method),
         "confidence_level": str(uncertainty_config.confidence_level),
     }
-
-    pipeline = build_champion_pipeline()
 
     with mlflow.start_run(
         experiment_id=exp_id, run_name="champion-xgboost-candidate"
@@ -309,9 +341,31 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="MLflow tracking URI override (defaults to MLFLOW_TRACKING_URI or .env)",
     )
+    parser.add_argument(
+        "--model-path",
+        default=str(LOCAL_MODEL_PATH),
+        help="Path to the real trained final_contract_model.joblib artifact",
+    )
     args = parser.parse_args(argv)
-    populate(tracking_uri=args.tracking_uri)
-    return 0
+    try:
+        populate(
+            tracking_uri=args.tracking_uri,
+            local_model_path=Path(args.model_path),
+        )
+        return EXIT_SUCCESS
+    except PipelineInfraError as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "INFRA_ERROR",
+                    "exit_code": EXIT_INFRA_ERROR,
+                    "error": str(exc),
+                },
+                indent=2,
+            ),
+            file=sys.stderr,
+        )
+        return EXIT_INFRA_ERROR
 
 
 if __name__ == "__main__":

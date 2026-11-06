@@ -350,11 +350,9 @@ def execute_pipeline(
             if str(v.run_id) == run_id:
                 candidate_version = str(v.version)
                 break
-        if candidate_version is None and versions:
-            candidate_version = str(versions[0].version)
         if candidate_version is None:
             raise PipelineInfraError(
-                f"Model '{cfg.model_name}' was logged but no version was created."
+                f"Model '{cfg.model_name}' was logged for run '{run_id}' but no matching registered version was found."
             )
 
         client.set_registered_model_alias(
