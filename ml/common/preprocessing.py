@@ -4,6 +4,7 @@ Every derived feature is computable at decision time from the six contract
 fields. The same module is imported by the training pipeline and by the
 serving code (parity is enforced by tests).
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -82,7 +83,9 @@ def build_preprocessor(numeric_features: list[str] | None = None) -> ColumnTrans
     protocols without duplicating the transformation. The default is the full
     contract model, so training and serving stay on one implementation.
     """
-    numeric = list(numeric_features) if numeric_features is not None else NUMERIC_FEATURES
+    numeric = (
+        list(numeric_features) if numeric_features is not None else NUMERIC_FEATURES
+    )
     return ColumnTransformer(
         transformers=[
             ("num", StandardScaler(), numeric),

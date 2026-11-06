@@ -1,4 +1,5 @@
 """Path resolution for the local PaySim dataset (git-ignored)."""
+
 from __future__ import annotations
 
 import os

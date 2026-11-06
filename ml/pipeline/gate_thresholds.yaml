@@ -1,0 +1,39 @@
+# Canonical Quality Gate & Governance Thresholds for MLOps Pipeline (Role 5)
+# Zero thresholds are hardcoded in Python; all validation and promotion rules read this file.
+
+schema_version: "1.0"
+model_name: "fraud-detector"
+experiment_name: "paysim-fraud-benchmark"
+
+performance_metrics:
+  min_pr_auc: 0.90
+  min_roc_auc: 0.95
+  min_f1: 0.85
+  min_recall: 0.85
+  max_brier_score: 0.05
+
+operational_budgets:
+  max_expected_review_rate: 0.05      # <= 5% human review rate on in-scope TRANSFER + CASH_OUT
+  max_inference_p95_ms: 300.0         # < 300 ms p95 latency budget
+
+conformal_validation:
+  require_empirical_coverage: true
+  finite_sample_tolerance: 0.005      # Allows 0.985 empirical coverage for 0.99 target on finite test splits
+
+statistical_validation:
+  required: true
+  artifact_name: "statistical_validation.json"
+  max_friedman_p_value: 0.05
+  require_wilcoxon_holm_superiority: true
+  max_wilcoxon_holm_p_value: 0.05
+
+promotion_policy:
+  forbidden_production_data_sources:
+    - "synthetic"
+  required_run_tags:
+    - "algorithm"
+    - "dataset_version"
+    - "git_sha"
+    - "seed"
+    - "data_source"
+    - "uncertainty_config_sha256"

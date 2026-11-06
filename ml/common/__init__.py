@@ -1,1 +1,1 @@
-"""Shared loading and preprocessing utilities (Role 4)."""
+"""Shared schema, loading, and preprocessing modules used by Training and Serving."""

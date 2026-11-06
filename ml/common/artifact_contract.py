@@ -2,9 +2,9 @@
 
 This is the single module both sides import. It keeps the serving-side
 ``UncertaintyConfigContract`` API (feature_names / transformed_feature_names,
-MODEL_ARTIFACT_PATH, ...) while retaining the training-side metadata fields
-(dataset/feature-list version, calibration size, eval population) and the
-``log_pipeline`` helper.
+MODEL_ARTIFACT_PATH, SHA-256 verification, etc.) while retaining the training-side
+metadata fields (dataset/feature-list version, calibration size, eval population),
+and helper functions (``prediction_set``, ``suggested_action``, ``log_pipeline``).
 
 Training logs with::
 
@@ -15,13 +15,15 @@ candidate to ``@staging``/``@production``. Serving loads
 ``models:/fraud-detector@production`` plus the companion
 ``uncertainty_config.json``.
 """
+
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import tempfile
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -39,14 +41,20 @@ DEFAULT_EXPERIMENT_NAME = "paysim-fraud-benchmark"
 EXPERIMENT_NAME = DEFAULT_EXPERIMENT_NAME
 REGISTERED_MODEL_NAME = "fraud-detector"
 MODEL_NAME = REGISTERED_MODEL_NAME
+
 CANDIDATE_ALIAS = "candidate"
 STAGING_ALIAS = "staging"
 PRODUCTION_ALIAS = "production"
+PREVIOUS_ALIAS = "previous"
 DATA_SOURCE = "paysim"
+DATA_SOURCE_TAG = "data_source"
 
+# Artifacts expected inside every registered MLflow model run
 MODEL_ARTIFACT_PATH = "model"
 UNCERTAINTY_CONFIG_ARTIFACT = "uncertainty_config.json"
 UNCERTAINTY_CONFIG_FILENAME = UNCERTAINTY_CONFIG_ARTIFACT
+STATISTICAL_VALIDATION_ARTIFACT = "statistical_validation.json"
+UNCERTAINTY_SHA256_TAG = "uncertainty_config_sha256"
 ARTIFACT_SCHEMA_VERSION = "1.0"
 
 # 14 transformed columns out of build_preprocessor() — the serving golden
@@ -56,6 +64,7 @@ EXPECTED_TRANSFORMED_FEATURES: list[str] = list(NUMERIC_FEATURES) + [
     f"type_{transaction_type}" for transaction_type in TRANSACTION_TYPES
 ]
 
+# Required metrics logged on the in-scope (TRANSFER + CASH_OUT) evaluation split
 REQUIRED_LOGGED_METRICS: tuple[str, ...] = (
     "roc_auc",
     "pr_auc",
@@ -67,6 +76,7 @@ REQUIRED_LOGGED_METRICS: tuple[str, ...] = (
     "expected_review_rate",
     "inference_p95_ms",
 )
+
 REQUIRED_RUN_TAGS: tuple[str, ...] = (
     "algorithm",
     "dataset_version",
@@ -78,7 +88,7 @@ REQUIRED_RUN_TAGS: tuple[str, ...] = (
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass
@@ -109,7 +119,9 @@ class UncertaintyConfig:
 
     # Training-side metadata (ignored by the serving loader)
     schema_version: str = ARTIFACT_SCHEMA_VERSION
-    contract_features: list[str] = field(default_factory=lambda: list(CONTRACT_FEATURES))
+    contract_features: list[str] = field(
+        default_factory=lambda: list(CONTRACT_FEATURES)
+    )
     derived_features: list[str] = field(default_factory=lambda: list(DERIVED_FEATURES))
     model_feature_names: list[str] = field(default_factory=list)
     dataset_version: str = "paysim"
@@ -124,10 +136,16 @@ class UncertaintyConfig:
         else:
             self.model_feature_names = list(self.transformed_feature_names)
         if not self.feature_names:
-            self.feature_names = list(self.contract_features) + list(self.derived_features)
+            self.feature_names = list(self.contract_features) + list(
+                self.derived_features
+            )
 
     def validate(self) -> None:
-        if self.method not in ("split_conformal", "mondrian_conformal", "ensemble_bootstrap"):
+        if self.method not in (
+            "split_conformal",
+            "mondrian_conformal",
+            "ensemble_bootstrap",
+        ):
             raise ValueError(f"Unsupported uncertainty method: {self.method}")
         if not 0.5 <= self.confidence_level <= 0.999:
             raise ValueError(
@@ -160,8 +178,12 @@ class UncertaintyConfig:
         self.validate()
         return asdict(self)
 
+    def sha256(self) -> str:
+        """Compute canonical SHA-256 hex digest of this uncertainty configuration."""
+        return compute_uncertainty_sha256(self.to_dict())
+
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "UncertaintyConfig":
+    def from_dict(cls, data: dict[str, Any]) -> UncertaintyConfig:
         def _metric(value: Any) -> Any:
             if value is None or isinstance(value, (bool, int, float)):
                 return value
@@ -212,12 +234,57 @@ class UncertaintyConfig:
         return path
 
     @classmethod
-    def load(cls, path: str | Path) -> "UncertaintyConfig":
+    def load(cls, path: str | Path) -> UncertaintyConfig:
         return cls.from_dict(json.loads(Path(path).read_text()))
 
 
-# Serving-side canonical name
+# Serving-side canonical name (Dual Alias for 100% interoperability)
 UncertaintyConfigContract = UncertaintyConfig
+
+
+def compute_uncertainty_sha256(
+    config: UncertaintyConfigContract | dict[str, Any],
+) -> str:
+    """Compute deterministic SHA-256 hex digest over the canonical uncertainty config."""
+    if isinstance(config, UncertaintyConfig):
+        payload = config.to_dict()
+    else:
+        payload = UncertaintyConfig.from_dict(config).to_dict()
+    canonical_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    return hashlib.sha256(canonical_bytes).hexdigest()
+
+
+def verify_uncertainty_sha256(
+    *,
+    expected_sha256: str,
+    config: UncertaintyConfigContract,
+    raw_bytes: bytes | None = None,
+    raw_dict: dict[str, Any] | None = None,
+) -> bool:
+    """Verify an uncertainty config against its recorded SHA-256 tag.
+
+    Accepts a match against:
+    1. The canonical `UncertaintyConfigContract` SHA-256 (`compute_uncertainty_sha256(config)`).
+    2. The sorted-keys JSON digest of `raw_dict` (if training included extra metadata keys).
+    3. The exact `raw_bytes` file digest (if computed directly on file bytes).
+    """
+    expected = expected_sha256.strip().lower()
+    if not expected:
+        return False
+    if compute_uncertainty_sha256(config).lower() == expected:
+        return True
+    if raw_dict is not None:
+        raw_canonical = json.dumps(
+            raw_dict, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        if hashlib.sha256(raw_canonical).hexdigest().lower() == expected:
+            return True
+    return bool(
+        raw_bytes is not None
+        and hashlib.sha256(raw_bytes).hexdigest().lower() == expected
+    )
 
 
 def prediction_set(p_fraud: float, config: UncertaintyConfig) -> list[str]:

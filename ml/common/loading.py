@@ -1,4 +1,5 @@
 """Load PaySim from the local Parquet cache."""
+
 from __future__ import annotations
 
 from pathlib import Path
