@@ -388,32 +388,72 @@ def test_fetch_model_extract_and_verify_archive_strict(tmp_path: Path) -> None:
 
 def test_load_champion_pipeline_rejects_config_mismatch(tmp_path: Path) -> None:
     """Validate that load_champion_pipeline strictly rejects artifacts whose embedded config disagrees with uncertainty_config.json."""
-    import joblib
+    import json
 
+    import joblib
+    import numpy as np
+    import pandas as pd
+    from sklearn.pipeline import Pipeline
+    from xgboost import XGBClassifier
+
+    from ml.common.preprocessing import build_features, build_preprocessor
+    from ml.common.schema import TRANSACTION_TYPES
     from ml.pipeline.mlflow_config import PipelineInfraError
     from ml.pipeline.populate_mlflow import (
-        LOCAL_MODEL_PATH,
+        UNCERTAINTY_JSON_PATH,
         load_champion_pipeline,
     )
 
-    loaded = joblib.load(LOCAL_MODEL_PATH)
-    tampered = dict(loaded)
-    bad_config = dict(loaded["config"])
+    real_config = json.loads(UNCERTAINTY_JSON_PATH.read_text(encoding="utf-8"))
+
+    sample_rows = [
+        {
+            "type": tx_type,
+            "amount": 100.0 + idx * 10.0,
+            "sender_old_balance": 1000.0,
+            "sender_new_balance": 900.0 - idx * 10.0,
+            "receiver_old_balance": 500.0,
+            "receiver_new_balance": 600.0 + idx * 10.0,
+        }
+        for idx, tx_type in enumerate(TRANSACTION_TYPES * 2)
+    ]
+    y_sample = np.array([idx % 2 for idx in range(len(sample_rows))], dtype=int)
+    fitted_pipe = Pipeline(
+        steps=[
+            ("preprocessor", build_preprocessor()),
+            (
+                "classifier",
+                XGBClassifier(
+                    n_estimators=2,
+                    max_depth=2,
+                    random_state=42,
+                    eval_metric="logloss",
+                ),
+            ),
+        ]
+    )
+    fitted_pipe.fit(build_features(pd.DataFrame(sample_rows)), y_sample)
+
+    # 1. Valid coupled artifact (matching UNCERTAINTY_JSON_PATH) MUST succeed
+    valid_path = tmp_path / "valid_model.joblib"
+    joblib.dump({"pipeline": fitted_pipe, "config": real_config}, valid_path)
+    loaded_pipe = load_champion_pipeline(local_model_path=valid_path)
+    assert isinstance(loaded_pipe, Pipeline)
+
+    # 2. Tampered embedded config (q_hat_fraud = 0.999) MUST be rejected by default
+    bad_config = dict(real_config)
     bad_config["q_hat_fraud"] = 0.999
-    tampered["config"] = bad_config
-
     tampered_path = tmp_path / "tampered_model.joblib"
-    joblib.dump(tampered, tampered_path)
+    joblib.dump({"pipeline": fitted_pipe, "config": bad_config}, tampered_path)
 
-    # Calling load_champion_pipeline(tampered_path) directly (using default expected_config_path) MUST reject
     with pytest.raises(
         PipelineInfraError, match="embedded uncertainty config mismatch"
     ):
         load_champion_pipeline(local_model_path=tampered_path)
 
-    # Bare Pipeline without embedded config dict MUST also be rejected
+    # 3. Bare Pipeline without embedded config dict MUST also be rejected
     bare_path = tmp_path / "bare_pipeline.joblib"
-    joblib.dump(loaded["pipeline"], bare_path)
+    joblib.dump(fitted_pipe, bare_path)
     with pytest.raises(PipelineInfraError, match="Invalid model structure"):
         load_champion_pipeline(local_model_path=bare_path)
 

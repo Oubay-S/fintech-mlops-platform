@@ -60,13 +60,6 @@ from ml.common.preprocessing import (
     train_calibration_split,
 )
 from ml.common.schema import CONTRACT_FEATURES, DERIVED_FEATURES, assert_paysim_schema
-from ml.training.scripts.run_statistics import (
-    EXPECTED_BLOCKS,
-    EXPECTED_PROTOCOLS,
-    MODEL_ORDER,
-    analyse,
-    validate_benchmark,
-)
 
 from .conformal_eval import evaluate_existing_thresholds_on_split
 from .mlflow_config import (
@@ -105,6 +98,15 @@ def _compute_real_statistical_validation(
     Raises `PipelineInfraError` if the benchmark CSV is missing, incomplete, or invalid.
     Never fabricates or falls back to placeholder statistical values.
     """
+    # Lazy import so module collection does not import ml.common.paths before ml/training/tests/conftest.py
+    from ml.training.scripts.run_statistics import (
+        EXPECTED_BLOCKS,
+        EXPECTED_PROTOCOLS,
+        MODEL_ORDER,
+        analyse,
+        validate_benchmark,
+    )
+
     if not results_csv_path.exists():
         raise PipelineInfraError(
             f"Benchmark results CSV not found at '{results_csv_path}'. "
