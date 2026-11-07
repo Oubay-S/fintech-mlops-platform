@@ -461,17 +461,34 @@ def test_load_champion_pipeline_rejects_config_mismatch(tmp_path: Path) -> None:
 def test_resolve_release_assets_filters_model_release_and_pairs_stem(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Validate that resolve_release_assets ignores non-model latest releases and correctly pairs by stem."""
+    """Validate that resolve_release_assets ignores non-model and prerelease tags and pairs by stem."""
     import json
 
     from ml.pipeline import fetch_model
     from ml.pipeline.fetch_model import resolve_release_assets
     from ml.pipeline.mlflow_config import PipelineInfraError
 
+    rc_release = {
+        "tag_name": "model-v1.1.0-rc1",
+        "draft": False,
+        "prerelease": True,
+        "assets": [
+            {
+                "name": "fraud-detector-paysim-v1.1.0-rc1.zip",
+                "browser_download_url": "https://example.com/rc.zip",
+            },
+            {
+                "name": "fraud-detector-paysim-v1.1.0-rc1.zip.sha256",
+                "browser_download_url": "https://example.com/rc.zip.sha256",
+            },
+        ],
+    }
+
     mock_releases = [
         {
             "tag_name": "v2.0.0",
             "draft": False,
+            "prerelease": False,
             "assets": [
                 {
                     "name": "backend.zip",
@@ -483,9 +500,11 @@ def test_resolve_release_assets_filters_model_release_and_pairs_stem(
                 },
             ],
         },
+        rc_release,
         {
             "tag_name": "model-v1.0.0",
             "draft": False,
+            "prerelease": False,
             "assets": [
                 {
                     "name": "dataset.zip",
@@ -510,6 +529,8 @@ def test_resolve_release_assets_filters_model_release_and_pairs_stem(
     def mock_http_get_bytes(
         url: str, *, accept: str = "application/octet-stream"
     ) -> bytes:
+        if url.endswith("/tags/model-v1.1.0-rc1"):
+            return json.dumps(rc_release).encode("utf-8")
         return json.dumps(mock_releases).encode("utf-8")
 
     monkeypatch.setattr(fetch_model, "_http_get_bytes", mock_http_get_bytes)
@@ -522,3 +543,7 @@ def test_resolve_release_assets_filters_model_release_and_pairs_stem(
     # Explicit non-model tag must be rejected immediately
     with pytest.raises(PipelineInfraError, match="Invalid model release tag"):
         resolve_release_assets(repo="test/repo", tag="v2.0.0")
+
+    # Explicit prerelease tag must also be rejected
+    with pytest.raises(PipelineInfraError, match="prerelease"):
+        resolve_release_assets(repo="test/repo", tag="model-v1.1.0-rc1")

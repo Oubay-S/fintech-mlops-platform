@@ -225,7 +225,7 @@ If you prefer to retrain the models from scratch on the real PaySim dataset (`ml
    ```bash
    python -m ml.training.scripts.package_model
    ```
-   (Packages `final_contract_model.joblib`, `uncertainty_config.json`, `statistical_validation.json`, and `MANIFEST.json` into `ml/training/package/`).
+   (Packages `uncertainty_config.json`, `metrics_summary.json`, `model_card.md`, `parity_cases.json`, `feature_list_v1.md`, and `MANIFEST.json` into `ml/training/package/`, while `final_contract_model.joblib` remains in `ml/data/processed/` and `statistical_validation.json` remains in `ml/training/results/`).
 7. **Populate MLflow Registry:**
    ```bash
    python -m ml.pipeline.populate_mlflow

@@ -1,7 +1,7 @@
-"""Reproducible End-to-End MLOps Pipeline Orchestrator for CI & Academic Verification (Role 5).
+"""Reproducible End-to-End MLOps Pipeline Orchestrator for CI & Staging Gate Verification (Role 5).
 
 Usage:
-    # Nominal mode on PaySim CSV dataset (tags data_source=paysim, computes real benchmark stats, gates & promotes to @staging)
+    # Staging gate verification mode on PaySim CSV dataset (tags data_source=paysim, gates & promotes to @staging)
     python -m ml.pipeline.run_pipeline --data-path data/paysim.csv
 
     # CI / Smoke-test mode on in-memory synthetic dataset (tags data_source=synthetic, smoke-only, no gate/promotion)
@@ -13,9 +13,12 @@ Strict Governance & Boundaries:
     2. Every `--synthetic` run is explicitly smoke-only: it is tagged with `data_source=synthetic`,
        never logs fabricated or borrowed statistical validation artifacts, and never runs the
        promotion gate or promotes to `@staging` / `@production`.
-    3. On real `--data-path` runs (`data_source=paysim`), paired statistical validation is
-       computed directly from `ml/training/results/benchmark_runs.csv`, `validate_gate.py` is
-       executed, and a passing candidate is promoted ONLY to `@staging` (never `@production`).
+    3. On `--data-path` verification runs (`data_source=paysim`), this orchestrator fits a fast
+       `LogisticRegression` verification model and attaches the 5-model benchmark's paired
+       statistical validation computed from `ml/training/results/benchmark_runs.csv` to exercise
+       `validate_gate.py` and `@candidate` -> `@staging` promotion (never `@production`).
+       Note: Production Champion XGBoost registration is performed by `ml/pipeline/populate_mlflow.py`
+       (or `ml/training/scripts/run_conformal.py --log-mlflow`), not by this verification script.
 """
 
 from __future__ import annotations

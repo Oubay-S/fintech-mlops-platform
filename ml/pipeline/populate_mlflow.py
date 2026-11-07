@@ -46,6 +46,7 @@ from ml.common.artifact_contract import (
     DEFAULT_EXPERIMENT_NAME,
     EXPECTED_TRANSFORMED_FEATURES,
     MODEL_ARTIFACT_PATH,
+    PREVIOUS_ALIAS,
     PRODUCTION_ALIAS,
     REGISTERED_MODEL_NAME,
     STAGING_ALIAS,
@@ -362,7 +363,12 @@ def populate(
             )
             if reset:
                 protected_run_ids: set[str] = set()
-                for alias in (PRODUCTION_ALIAS, STAGING_ALIAS, CANDIDATE_ALIAS):
+                for alias in (
+                    PRODUCTION_ALIAS,
+                    STAGING_ALIAS,
+                    CANDIDATE_ALIAS,
+                    PREVIOUS_ALIAS,
+                ):
                     try:
                         mv = client.get_model_version_by_alias(
                             REGISTERED_MODEL_NAME, alias
@@ -478,7 +484,7 @@ def main(argv: list[str] | None = None) -> int:
         "--reset",
         action="store_true",
         default=False,
-        help="Explicitly prune previous unaliased seeder runs in the experiment. Never deletes runs associated with active @production, @staging, or @candidate model aliases.",
+        help="Explicitly prune previous unaliased seeder runs in the experiment. Never deletes runs associated with active @production, @staging, @candidate, or @previous model aliases.",
     )
     args = parser.parse_args(argv)
     try:

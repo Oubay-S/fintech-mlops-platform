@@ -93,18 +93,19 @@ def resolve_release_assets(
                 f"GitHub Releases API '{endpoint}' returned no published releases for repo '{repo}'."
             )
 
-        # Strictly select non-draft releases tagged with the canonical 'model-' prefix
+        # Strictly select non-draft, non-prerelease releases tagged with the canonical 'model-' prefix
         candidate_releases = [
             r
             for r in releases
             if isinstance(r, dict)
             and not bool(r.get("draft", False))
+            and not bool(r.get("prerelease", False))
             and str(r.get("tag_name", "")).strip().startswith(MODEL_RELEASE_TAG_PREFIX)
         ]
         if not candidate_releases:
             raise PipelineInfraError(
-                f"No published model release found in repo '{repo}'. "
-                f"Expected a non-draft release tagged with '{MODEL_RELEASE_TAG_PREFIX}*'."
+                f"No published stable model release found in repo '{repo}'. "
+                f"Expected a non-draft, non-prerelease tagged with '{MODEL_RELEASE_TAG_PREFIX}*'."
             )
         release_data = candidate_releases[0]
     else:
@@ -120,9 +121,13 @@ def resolve_release_assets(
             raise PipelineInfraError(
                 f"Malformed JSON response from GitHub Releases API '{endpoint}': {exc}"
             ) from exc
-        if not isinstance(release_data, dict) or bool(release_data.get("draft", False)):
+        if (
+            not isinstance(release_data, dict)
+            or bool(release_data.get("draft", False))
+            or bool(release_data.get("prerelease", False))
+        ):
             raise PipelineInfraError(
-                f"Release '{clean_tag}' in '{repo}' is invalid or a draft release."
+                f"Release '{clean_tag}' in '{repo}' is invalid, a draft, or a prerelease."
             )
 
     resolved_tag = str(release_data.get("tag_name", "")).strip()
@@ -172,11 +177,19 @@ def resolve_release_assets(
         )
 
     zip_asset, sha_asset = matched_pairs[0]
+    zip_url = str(zip_asset.get("browser_download_url", "")).strip()
+    sha_url = str(sha_asset.get("browser_download_url", "")).strip()
+    if not zip_url.startswith(("https://", "http://")) or not sha_url.startswith(
+        ("https://", "http://")
+    ):
+        raise PipelineInfraError(
+            f"Release '{resolved_tag}' in '{repo}' has missing or invalid asset browser_download_url."
+        )
 
     return (
         resolved_tag,
-        str(zip_asset["browser_download_url"]),
-        str(sha_asset["browser_download_url"]),
+        zip_url,
+        sha_url,
     )
 
 

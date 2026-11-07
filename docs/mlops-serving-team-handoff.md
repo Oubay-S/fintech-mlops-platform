@@ -242,7 +242,7 @@ The serving container is ready for Phase 9 Locust load testing (`ml/load-tests/`
 ```mermaid
 flowchart TD
     subgraph CI ["1. GitHub Actions CI (Pull Request — Ephemeral VM)"]
-        CI1["Run ruff & pytest ml/ (72 unit/integration tests)"]
+        CI1["Run ruff & pytest ml/ (74 unit/integration tests)"]
         CI2["Optional: Start ephemeral compose stack in runner"]
         CI3["Run populate_mlflow -> validate_gate -> promote_model"]
         CI4["Destroy VM after job completes (Proves code & gate validity)"]
@@ -266,7 +266,7 @@ In `.github/workflows/ci.yml`, the `ml-services` job runs `pytest ml/ -v` (which
         run: |
           python -m ml.pipeline.run_pipeline --synthetic --synthetic-rows 600
 ```
-*(Note: `--synthetic` tests the full MLflow logging $\rightarrow$ `validate_gate.py` $\rightarrow$ `@staging` promotion pipeline in 3 seconds using a local temporary tracking store, while verifying that synthetic models are strictly blocked from `@production`).*
+*(Note: `--synthetic` is strictly smoke-only — it verifies preprocessing, MLflow artifact logging, and `@candidate` registration in 3 seconds with `data_source=synthetic`, without logging fabricated statistical validation or running gate promotion to `@staging` / `@production`).*
 
 ### 6.3 Kubernetes Manifests Reference (For `k8s/base/`)
 
