@@ -7,7 +7,7 @@
 - **Role 3 (DevOps & Cloud Infrastructure):** Docker Compose, CI/CD pipelines, Kubernetes manifests, K8s Seeder Job, and Prometheus/Grafana observability
 - **Role 4 (Data Scientist):** Certified 6/6 Golden Parity verification (`max |Δ| = 0.0`) and Phase 9 Locust load-testing orientation
 
-**Status:** Production-Ready · All 5 Integration Phases Verified · 70/70 Automated Tests Passing
+**Status:** Production-Ready · All 5 Integration Phases Verified · 72/72 Automated Tests Passing
 
 ---
 
@@ -242,7 +242,7 @@ The serving container is ready for Phase 9 Locust load testing (`ml/load-tests/`
 ```mermaid
 flowchart TD
     subgraph CI ["1. GitHub Actions CI (Pull Request — Ephemeral VM)"]
-        CI1["Run ruff & pytest ml/ (70 unit/integration tests)"]
+        CI1["Run ruff & pytest ml/ (72 unit/integration tests)"]
         CI2["Optional: Start ephemeral compose stack in runner"]
         CI3["Run populate_mlflow -> validate_gate -> promote_model"]
         CI4["Destroy VM after job completes (Proves code & gate validity)"]
@@ -259,7 +259,7 @@ flowchart TD
 ```
 
 ### 6.2 GitHub Actions CI Integration Snippet
-In `.github/workflows/ci.yml`, the `ml-services` job runs `pytest ml/ -v` (which executes all 70 tests across `ml/training/tests`, `ml/pipeline/tests`, and `ml/serving/tests`). To also run an end-to-end MLOps Quality Gate check in CI:
+In `.github/workflows/ci.yml`, the `ml-services` job runs `pytest ml/ -v` (which executes all 72 tests across `ml/training/tests`, `ml/pipeline/tests`, and `ml/serving/tests`). To also run an end-to-end MLOps Quality Gate check in CI:
 
 ```yaml
       - name: Run MLOps Smoke Pipeline & Quality Gate Check

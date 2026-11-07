@@ -24,6 +24,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 # Ensure UTF-8 stdout on Windows consoles for MLflow client output
 if hasattr(sys.stdout, "reconfigure"):
@@ -45,7 +46,9 @@ from ml.common.artifact_contract import (
     DEFAULT_EXPERIMENT_NAME,
     EXPECTED_TRANSFORMED_FEATURES,
     MODEL_ARTIFACT_PATH,
+    PRODUCTION_ALIAS,
     REGISTERED_MODEL_NAME,
+    STAGING_ALIAS,
     UNCERTAINTY_SHA256_TAG,
     UncertaintyConfig,
     compute_uncertainty_sha256,
@@ -94,12 +97,15 @@ def _is_finite_number(val: object) -> bool:
 
 def load_champion_pipeline(
     local_model_path: Path = LOCAL_MODEL_PATH,
+    expected_config_path: Path = UNCERTAINTY_JSON_PATH,
 ) -> Pipeline:
     """Strictly load and validate the real PaySim-trained Champion Pipeline from disk.
 
     Raises `PipelineInfraError` if the `.joblib` file does not exist, is not a
-    fitted scikit-learn `Pipeline` with an `XGBClassifier`, or does not match
-    the 14-column transformed feature contract. Never builds a surrogate model.
+    dictionary containing both a fitted scikit-learn `Pipeline` (`XGBClassifier`)
+    and an embedded `config` dictionary, does not match the 14-column transformed
+    feature contract, or has an embedded uncertainty config whose canonical SHA-256
+    disagrees with `expected_config_path`. Never builds a surrogate model.
     """
     if not local_model_path.exists():
         raise PipelineInfraError(
@@ -109,6 +115,12 @@ def load_champion_pipeline(
             "official release model artifact into 'ml/data/processed/'."
         )
 
+    if not expected_config_path.exists():
+        raise PipelineInfraError(
+            f"Expected uncertainty config file not found at '{expected_config_path}' "
+            f"for atomic validation of model '{local_model_path}'."
+        )
+
     try:
         loaded = joblib.load(local_model_path)
     except Exception as exc:
@@ -116,15 +128,37 @@ def load_champion_pipeline(
             f"Failed to deserialize model artifact at '{local_model_path}': {exc}"
         ) from exc
 
-    if isinstance(loaded, dict) and isinstance(loaded.get("pipeline"), Pipeline):
-        pipeline: Pipeline = loaded["pipeline"]
-    elif isinstance(loaded, Pipeline):
-        pipeline = loaded
-    else:
+    if not isinstance(loaded, dict) or not isinstance(loaded.get("pipeline"), Pipeline):
         raise PipelineInfraError(
             f"Invalid model structure in '{local_model_path}': expected a "
-            "scikit-learn Pipeline or dict with key 'pipeline', got "
+            "dict with key 'pipeline' containing a scikit-learn Pipeline, got "
             f"{type(loaded).__name__}."
+        )
+
+    pipeline: Pipeline = loaded["pipeline"]
+    embedded_config: Any = loaded.get("config")
+    if not isinstance(embedded_config, dict):
+        raise PipelineInfraError(
+            f"Model artifact at '{local_model_path}' is missing embedded 'config' "
+            f"dictionary; cannot atomically verify against '{expected_config_path}'."
+        )
+
+    # Enforce strict atomic coupling between embedded model config and package config
+    try:
+        with open(expected_config_path, "r", encoding="utf-8") as f:
+            expected_dict = json.load(f)
+        embedded_sha = compute_uncertainty_sha256(embedded_config)
+        expected_sha = compute_uncertainty_sha256(expected_dict)
+    except Exception as exc:
+        raise PipelineInfraError(
+            f"Failed to compute uncertainty config checksums for '{local_model_path}': {exc}"
+        ) from exc
+
+    if embedded_sha != expected_sha:
+        raise PipelineInfraError(
+            f"Model artifact at '{local_model_path}' has embedded uncertainty config mismatch with '{expected_config_path}': "
+            f"embedded SHA-256 '{embedded_sha}' != expected SHA-256 '{expected_sha}'. "
+            "Refusing to register a decoupled model whose conformal parameters do not match model weights."
         )
 
     if (
@@ -260,6 +294,7 @@ def _extract_champion_metrics(cfg_dict: dict[str, object]) -> dict[str, float]:
 def populate(
     tracking_uri: str | None = None,
     local_model_path: Path = LOCAL_MODEL_PATH,
+    reset: bool = False,
 ) -> None:
     """Populate benchmark runs and register the `@candidate` champion model in MLflow."""
     for required_file in (
@@ -273,7 +308,10 @@ def populate(
             )
 
     # Validate the real trained model and artifacts BEFORE modifying MLflow state
-    pipeline = load_champion_pipeline(local_model_path=local_model_path)
+    pipeline = load_champion_pipeline(
+        local_model_path=local_model_path,
+        expected_config_path=UNCERTAINTY_JSON_PATH,
+    )
     try:
         df = pd.read_csv(BENCHMARK_CSV_PATH)
     except Exception as exc:
@@ -322,11 +360,24 @@ def populate(
             print(
                 f"Using existing experiment '{DEFAULT_EXPERIMENT_NAME}' (ID: {exp_id})"
             )
-            for r in client.search_runs(exp_id):
-                try:
-                    client.delete_run(r.info.run_id)
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            if reset:
+                protected_run_ids: set[str] = set()
+                for alias in (PRODUCTION_ALIAS, STAGING_ALIAS, CANDIDATE_ALIAS):
+                    try:
+                        mv = client.get_model_version_by_alias(
+                            REGISTERED_MODEL_NAME, alias
+                        )
+                        if mv and mv.run_id:
+                            protected_run_ids.add(str(mv.run_id))
+                    except Exception:  # noqa: BLE001, S110
+                        pass
+
+                for r in client.search_runs(exp_id):
+                    if r.info.run_id not in protected_run_ids:
+                        try:
+                            client.delete_run(r.info.run_id)
+                        except Exception:  # noqa: BLE001, S110
+                            pass
 
         # 1. Log benchmark runs from benchmark_runs.csv
         for model_name, mean_metrics in benchmark_runs_metrics.items():
@@ -423,11 +474,18 @@ def main(argv: list[str] | None = None) -> int:
         default=str(LOCAL_MODEL_PATH),
         help="Path to the real trained final_contract_model.joblib artifact",
     )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        default=False,
+        help="Explicitly prune previous unaliased seeder runs in the experiment. Never deletes runs associated with active @production, @staging, or @candidate model aliases.",
+    )
     args = parser.parse_args(argv)
     try:
         populate(
             tracking_uri=args.tracking_uri,
             local_model_path=Path(args.model_path),
+            reset=args.reset,
         )
         return EXIT_SUCCESS
     except Exception as exc:  # noqa: BLE001

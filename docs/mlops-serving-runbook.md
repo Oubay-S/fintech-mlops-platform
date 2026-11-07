@@ -194,9 +194,42 @@ python -m ml.pipeline.fetch_model --tag model-v1.0.0
 
 If you prefer to retrain the models from scratch on the real PaySim dataset (`ml/data/raw/PS_20174392719_1491204439457_log.csv`):
 
-1. Run `python -m ml.training.scripts.prepare_data` (or add `--sample` for the 200k PaySim stratified sample) to generate the train and calibration splits in `ml/data/processed/`.
-2. Run `python -m ml.training.scripts.run_benchmark --models lr,rf,xgb,svm,mlp --protocol contract --log-mlflow` to reproduce the 5 benchmark comparison runs and record `ml/training/results/benchmark_runs.csv`.
-3. Run `python -m ml.training.scripts.run_conformal --model xgb --log-mlflow` to train the Champion XGBoost model, calibrate the Mondrian 99% conformal quantiles, save `ml/data/processed/final_contract_model.joblib`, and register the model directly in MLflow.
+1. **Prepare Data Splits:**
+   ```bash
+   python -m ml.training.scripts.prepare_data
+   ```
+   (Generates train, calibration, and test splits in `ml/data/processed/`; add `--sample` for the 200k PaySim stratified sample).
+2. **Build Evaluation Populations:**
+   ```bash
+   python -m ml.training.scripts.build_populations
+   ```
+   (Generates `ml/data/processed/populations/app_valid.parquet` required by benchmark and conformal evaluation).
+3. **Execute Full 3-Protocol Benchmark Matrix:**
+   ```bash
+   python -m ml.training.scripts.run_benchmark --models lr,rf,xgb,svm,mlp --protocol contract
+   python -m ml.training.scripts.run_benchmark --models lr,rf,xgb,svm,mlp --protocol restricted --append
+   python -m ml.training.scripts.run_benchmark --models lr,rf,xgb,svm,mlp --protocol rule_blind --append
+   ```
+   (Executes all 5 candidate models across all 3 protocols and appends results into `ml/training/results/benchmark_runs.csv`).
+4. **Compute Paired Statistical Validation:**
+   ```bash
+   python -m ml.training.scripts.run_statistics
+   ```
+   (Performs Friedman, pairwise Wilcoxon-Holm, and rank-biserial tests across all 15 blocks, generating `ml/training/results/statistical_validation.json`).
+5. **Train Champion Model & Conformal Quantiles:**
+   ```bash
+   python -m ml.training.scripts.run_conformal --model xgb --log-mlflow
+   ```
+   (Trains Champion XGBoost, calibrates Mondrian conformal quantiles, writes `ml/data/processed/final_contract_model.joblib`, and logs to MLflow).
+6. **Assemble Hand-off Package:**
+   ```bash
+   python -m ml.training.scripts.package_model
+   ```
+   (Packages `final_contract_model.joblib`, `uncertainty_config.json`, `statistical_validation.json`, and `MANIFEST.json` into `ml/training/package/`).
+7. **Populate MLflow Registry:**
+   ```bash
+   python -m ml.pipeline.populate_mlflow
+   ```
 
 ---
 

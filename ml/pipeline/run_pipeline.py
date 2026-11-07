@@ -1,19 +1,21 @@
 """Reproducible End-to-End MLOps Pipeline Orchestrator for CI & Academic Verification (Role 5).
 
 Usage:
-    # Nominal mode on PaySim CSV dataset (tags data_source=paysim)
+    # Nominal mode on PaySim CSV dataset (tags data_source=paysim, computes real benchmark stats, gates & promotes to @staging)
     python -m ml.pipeline.run_pipeline --data-path data/paysim.csv
 
-    # CI / Smoke-test mode on in-memory synthetic dataset (tags data_source=synthetic)
+    # CI / Smoke-test mode on in-memory synthetic dataset (tags data_source=synthetic, smoke-only, no gate/promotion)
     python -m ml.pipeline.run_pipeline --synthetic [--synthetic-rows 600]
 
 Strict Governance & Boundaries:
     1. Zero silent fallback: If `--data-path` is missing or does not exist on disk and
        `--synthetic` is NOT explicitly passed, exits immediately with code 2 (EXIT_INFRA_ERROR).
-    2. Every `--synthetic` run is tagged with `data_source=synthetic`, which is strictly blocked
-       from ever being promoted to `@production`.
-    3. The pipeline logs the candidate to MLflow under `@candidate`, runs `validate_gate.py`,
-       and promotes a passing candidate ONLY to `@staging` (never `@production`).
+    2. Every `--synthetic` run is explicitly smoke-only: it is tagged with `data_source=synthetic`,
+       never logs fabricated or borrowed statistical validation artifacts, and never runs the
+       promotion gate or promotes to `@staging` / `@production`.
+    3. On real `--data-path` runs (`data_source=paysim`), paired statistical validation is
+       computed directly from `ml/training/results/benchmark_runs.csv`, `validate_gate.py` is
+       executed, and a passing candidate is promoted ONLY to `@staging` (never `@production`).
 """
 
 from __future__ import annotations
@@ -58,12 +60,20 @@ from ml.common.preprocessing import (
     train_calibration_split,
 )
 from ml.common.schema import CONTRACT_FEATURES, DERIVED_FEATURES, assert_paysim_schema
+from ml.training.scripts.run_statistics import (
+    EXPECTED_BLOCKS,
+    EXPECTED_PROTOCOLS,
+    MODEL_ORDER,
+    analyse,
+    validate_benchmark,
+)
 
 from .conformal_eval import evaluate_existing_thresholds_on_split
 from .mlflow_config import (
     EXIT_GATE_FAILURE,
     EXIT_INFRA_ERROR,
     EXIT_SUCCESS,
+    REPO_ROOT,
     STAGING_ALIAS,
     GateThresholds,
     PipelineGateError,
@@ -76,6 +86,61 @@ from .promote_model import promote_model
 from .validate_gate import evaluate_run_against_gate
 
 IN_SCOPE_TYPES = ("TRANSFER", "CASH_OUT")
+BENCHMARK_RESULTS_CSV_PATH = (
+    REPO_ROOT / "ml" / "training" / "results" / "benchmark_runs.csv"
+)
+STATISTICAL_METRICS: list[str] = [
+    "pr_auc",
+    "hard_recall",
+    "consistent_hard_recall",
+    "f1",
+]
+
+
+def _compute_real_statistical_validation(
+    results_csv_path: Path = BENCHMARK_RESULTS_CSV_PATH,
+) -> dict[str, Any]:
+    """Compute genuine paired Friedman and Holm-adjusted Wilcoxon statistics from benchmark CSV.
+
+    Raises `PipelineInfraError` if the benchmark CSV is missing, incomplete, or invalid.
+    Never fabricates or falls back to placeholder statistical values.
+    """
+    if not results_csv_path.exists():
+        raise PipelineInfraError(
+            f"Benchmark results CSV not found at '{results_csv_path}'. "
+            "Cannot compute statistical validation without real benchmark runs."
+        )
+    try:
+        results_df = pd.read_csv(results_csv_path)
+        validate_benchmark(
+            results_df,
+            expected_models=MODEL_ORDER,
+            expected_protocols=EXPECTED_PROTOCOLS,
+            expected_blocks=EXPECTED_BLOCKS,
+            allow_partial=False,
+        )
+        findings = analyse(results_df, STATISTICAL_METRICS)
+    except Exception as exc:
+        raise PipelineInfraError(
+            f"Failed to compute valid paired statistical validation from '{results_csv_path}': {exc}"
+        ) from exc
+
+    if not findings:
+        raise PipelineInfraError(
+            f"No paired statistical findings produced from '{results_csv_path}'."
+        )
+
+    try:
+        results_label = results_csv_path.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        results_label = results_csv_path.name
+
+    return {
+        "schema_version": "1.0",
+        "results_csv": results_label,
+        "metrics": list(STATISTICAL_METRICS),
+        "findings": findings,
+    }
 
 
 def generate_synthetic_paysim_df(n_rows: int = 600, seed: int = 42) -> pd.DataFrame:
@@ -298,14 +363,10 @@ def execute_pipeline(
     )
     config_sha256 = uncertainty_config.sha256()
 
-    stat_payload = {
-        "schema_version": "1.0",
-        "friedman_p": 0.0001,
-        "min_holm_p": 0.0006,
-        "wilcoxon_holm_significant": True,
-        "protocol": "contract",
-        "population": "app_valid",
-    }
+    # Compute genuine paired statistical validation ONLY for real PaySim runs (never for synthetic smoke runs)
+    stat_payload: dict[str, Any] | None = (
+        _compute_real_statistical_validation() if data_source == "paysim" else None
+    )
 
     try:
         mlflow.set_tracking_uri(tracking_uri)
@@ -335,7 +396,8 @@ def execute_pipeline(
             )
             mlflow.log_metrics(metrics_summary)
             mlflow.log_dict(uncertainty_config.to_dict(), UNCERTAINTY_CONFIG_ARTIFACT)
-            mlflow.log_dict(stat_payload, STATISTICAL_VALIDATION_ARTIFACT)
+            if stat_payload is not None:
+                mlflow.log_dict(stat_payload, STATISTICAL_VALIDATION_ARTIFACT)
 
             mlflow.sklearn.log_model(
                 sk_model=pipeline,
@@ -367,7 +429,23 @@ def execute_pipeline(
             f"Failed to log candidate run to MLflow: {exc}"
         ) from exc
 
-    # Run Quality Gate on @candidate
+    # Synthetic mode is strictly smoke-only: never evaluate the gate or promote to @staging / @production
+    if data_source == "synthetic":
+        return {
+            "status": "SUCCESS",
+            "exit_code": EXIT_SUCCESS,
+            "run_id": run_id,
+            "model_name": cfg.model_name,
+            "model_version": candidate_version,
+            "candidate_alias": CANDIDATE_ALIAS,
+            "promoted_to_alias": None,
+            "gate_evaluated": False,
+            "data_source": data_source,
+            "uncertainty_config_sha256": config_sha256,
+            "metrics": metrics_summary,
+        }
+
+    # Run Quality Gate on @candidate (real PaySim runs only)
     gate_report = evaluate_run_against_gate(
         tracking_uri=tracking_uri,
         model_name=cfg.model_name,
@@ -396,6 +474,7 @@ def execute_pipeline(
         "model_version": promo_report.promoted_version,
         "candidate_alias": CANDIDATE_ALIAS,
         "promoted_to_alias": promo_report.to_alias,
+        "gate_evaluated": True,
         "data_source": data_source,
         "uncertainty_config_sha256": config_sha256,
         "metrics": metrics_summary,

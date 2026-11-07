@@ -33,9 +33,15 @@ from ml.pipeline.mlflow_config import (
     REPO_ROOT,
     PipelineInfraError,
 )
-from ml.pipeline.populate_mlflow import LOCAL_MODEL_PATH, load_champion_pipeline
+from ml.pipeline.populate_mlflow import (
+    LOCAL_MODEL_PATH,
+    UNCERTAINTY_JSON_PATH,
+    load_champion_pipeline,
+)
 
 DEFAULT_GITHUB_REPO = "Oubay-S/fintech-mlops-platform"
+MODEL_RELEASE_TAG_PREFIX = "model-"
+MODEL_ARCHIVE_PREFIX = "fraud-detector-"
 MODEL_ZIP_SUFFIX = "model/final_contract_model.joblib"
 SHA256SUMS_SUFFIX = "SHA256SUMS"
 
@@ -72,46 +78,100 @@ def resolve_release_assets(
     if not clean_tag:
         raise PipelineInfraError("Release tag must be a non-empty string.")
 
-    endpoint = (
-        f"https://api.github.com/repos/{repo}/releases/latest"
-        if clean_tag == "latest"
-        else f"https://api.github.com/repos/{repo}/releases/tags/{clean_tag}"
-    )
-    raw_json = _http_get_bytes(endpoint, accept="application/vnd.github+json")
-    try:
-        release_data: dict[str, Any] = json.loads(raw_json.decode("utf-8"))
-    except Exception as exc:
-        raise PipelineInfraError(
-            f"Malformed JSON response from GitHub Releases API '{endpoint}': {exc}"
-        ) from exc
+    if clean_tag == "latest":
+        endpoint = f"https://api.github.com/repos/{repo}/releases"
+        raw_json = _http_get_bytes(endpoint, accept="application/vnd.github+json")
+        try:
+            releases = json.loads(raw_json.decode("utf-8"))
+        except Exception as exc:
+            raise PipelineInfraError(
+                f"Malformed JSON response from GitHub Releases API '{endpoint}': {exc}"
+            ) from exc
+
+        if not isinstance(releases, list) or not releases:
+            raise PipelineInfraError(
+                f"GitHub Releases API '{endpoint}' returned no published releases for repo '{repo}'."
+            )
+
+        # Strictly select non-draft releases tagged with the canonical 'model-' prefix
+        candidate_releases = [
+            r
+            for r in releases
+            if isinstance(r, dict)
+            and not bool(r.get("draft", False))
+            and str(r.get("tag_name", "")).strip().startswith(MODEL_RELEASE_TAG_PREFIX)
+        ]
+        if not candidate_releases:
+            raise PipelineInfraError(
+                f"No published model release found in repo '{repo}'. "
+                f"Expected a non-draft release tagged with '{MODEL_RELEASE_TAG_PREFIX}*'."
+            )
+        release_data = candidate_releases[0]
+    else:
+        if not clean_tag.startswith(MODEL_RELEASE_TAG_PREFIX):
+            raise PipelineInfraError(
+                f"Invalid model release tag '{clean_tag}': must start with '{MODEL_RELEASE_TAG_PREFIX}'."
+            )
+        endpoint = f"https://api.github.com/repos/{repo}/releases/tags/{clean_tag}"
+        raw_json = _http_get_bytes(endpoint, accept="application/vnd.github+json")
+        try:
+            release_data = json.loads(raw_json.decode("utf-8"))
+        except Exception as exc:
+            raise PipelineInfraError(
+                f"Malformed JSON response from GitHub Releases API '{endpoint}': {exc}"
+            ) from exc
+        if not isinstance(release_data, dict) or bool(release_data.get("draft", False)):
+            raise PipelineInfraError(
+                f"Release '{clean_tag}' in '{repo}' is invalid or a draft release."
+            )
 
     resolved_tag = str(release_data.get("tag_name", "")).strip()
     assets = release_data.get("assets")
-    if not resolved_tag or not isinstance(assets, list) or not assets:
+    if (
+        not resolved_tag.startswith(MODEL_RELEASE_TAG_PREFIX)
+        or not isinstance(assets, list)
+        or not assets
+    ):
         raise PipelineInfraError(
-            f"Release '{clean_tag}' in '{repo}' has no downloadable assets."
+            f"Release '{clean_tag}' in '{repo}' has no valid downloadable model assets."
         )
 
-    zip_asset: dict[str, Any] | None = None
-    sha_asset: dict[str, Any] | None = None
+    zip_candidates = [
+        a
+        for a in assets
+        if isinstance(a, dict)
+        and str(a.get("name", "")).startswith(MODEL_ARCHIVE_PREFIX)
+        and str(a.get("name", "")).endswith(".zip")
+    ]
+    sha_candidates = [
+        a
+        for a in assets
+        if isinstance(a, dict)
+        and str(a.get("name", "")).endswith((".zip.sha256", ".sha256"))
+    ]
 
-    for asset in assets:
-        if not isinstance(asset, dict):
-            continue
-        name = str(asset.get("name", ""))
-        if name.endswith(".zip"):
-            zip_asset = asset
-        elif name.endswith((".zip.sha256", ".sha256")):
-            sha_asset = asset
+    matched_pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for z in zip_candidates:
+        z_name = str(z.get("name", ""))
+        stem = z_name[:-4]  # remove .zip
+        for s in sha_candidates:
+            s_name = str(s.get("name", ""))
+            if s_name in (f"{z_name}.sha256", f"{stem}.sha256"):
+                matched_pairs.append((z, s))
+                break
 
-    if zip_asset is None or not zip_asset.get("browser_download_url"):
+    if not matched_pairs:
         raise PipelineInfraError(
-            f"Release '{resolved_tag}' in '{repo}' is missing a '.zip' model archive asset."
+            f"Release '{resolved_tag}' in '{repo}' has no paired '{MODEL_ARCHIVE_PREFIX}*.zip' and '.sha256' assets."
         )
-    if sha_asset is None or not sha_asset.get("browser_download_url"):
+
+    if len(matched_pairs) > 1:
+        asset_names = [p[0].get("name") for p in matched_pairs]
         raise PipelineInfraError(
-            f"Release '{resolved_tag}' in '{repo}' is missing a '.sha256' checksum asset."
+            f"Release '{resolved_tag}' in '{repo}' contains multiple ambiguous model archives: {asset_names}."
         )
+
+    zip_asset, sha_asset = matched_pairs[0]
 
     return (
         resolved_tag,
@@ -149,6 +209,7 @@ def extract_and_verify_archive(
     zip_bytes: bytes,
     expected_zip_sha256: str,
     output_path: Path = LOCAL_MODEL_PATH,
+    expected_config_path: Path = UNCERTAINTY_JSON_PATH,
 ) -> Path:
     """Verify outer and inner SHA-256 checksums, extract `.joblib`, and validate the Pipeline."""
     actual_zip_sha256 = hashlib.sha256(zip_bytes).hexdigest().lower()
@@ -159,32 +220,30 @@ def extract_and_verify_archive(
         )
 
     try:
-        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
-        names = zf.namelist()
-    except Exception as exc:
-        raise PipelineInfraError(
-            f"Downloaded release asset is not a valid ZIP archive: {exc}"
-        ) from exc
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            names = zf.namelist()
+            model_entries = [
+                n for n in names if n.replace("\\", "/").endswith(MODEL_ZIP_SUFFIX)
+            ]
+            if not model_entries:
+                raise PipelineInfraError(
+                    f"Release archive does not contain '{MODEL_ZIP_SUFFIX}'."
+                )
+            model_entry = model_entries[0]
 
-    model_entries = [
-        n for n in names if n.replace("\\", "/").endswith(MODEL_ZIP_SUFFIX)
-    ]
-    if not model_entries:
-        raise PipelineInfraError(
-            f"Release archive does not contain '{MODEL_ZIP_SUFFIX}'."
-        )
-    model_entry = model_entries[0]
+            # Verify inner model checksum against SHA256SUMS in the archive
+            sha_entries = [
+                n for n in names if n.replace("\\", "/").endswith(SHA256SUMS_SUFFIX)
+            ]
+            if not sha_entries:
+                raise PipelineInfraError(
+                    f"Release archive is missing '{SHA256SUMS_SUFFIX}' manifest for inner file verification."
+                )
 
-    # Verify inner model checksum against SHA256SUMS in the archive
-    sha_entries = [n for n in names if n.replace("\\", "/").endswith(SHA256SUMS_SUFFIX)]
-    if not sha_entries:
-        raise PipelineInfraError(
-            f"Release archive is missing '{SHA256SUMS_SUFFIX}' manifest for inner file verification."
-        )
-
-    try:
-        model_bytes = zf.read(model_entry)
-        sha256sums_text = zf.read(sha_entries[0]).decode("utf-8")
+            model_bytes = zf.read(model_entry)
+            sha256sums_text = zf.read(sha_entries[0]).decode("utf-8")
+    except PipelineInfraError:
+        raise
     except Exception as exc:
         raise PipelineInfraError(
             f"Failed to read or decode entries from release ZIP archive: {exc}"
@@ -214,8 +273,11 @@ def extract_and_verify_archive(
         ) from exc
 
     try:
-        # Validate that the extracted file is a genuine fitted contract Pipeline before replacing target
-        load_champion_pipeline(local_model_path=tmp_path)
+        # Validate that the extracted file is a genuine fitted contract Pipeline and config before replacing target
+        load_champion_pipeline(
+            local_model_path=tmp_path,
+            expected_config_path=expected_config_path,
+        )
         os.replace(tmp_path, output_path)
     except PipelineInfraError:
         if tmp_path.exists():
