@@ -7,7 +7,7 @@
 - **Role 3 (DevOps & Cloud Infrastructure):** Docker Compose, CI/CD pipelines, Kubernetes manifests, K8s Seeder Job, and Prometheus/Grafana observability
 - **Role 4 (Data Scientist):** Certified 6/6 Golden Parity verification (`max |Δ| = 0.0`) and Phase 9 Locust load-testing orientation
 
-**Status:** Production-Ready · All 5 Integration Phases Verified · 70/70 Automated Tests Passing
+**Status:** Production-Ready · All 5 Integration Phases Verified · 72/72 Automated Tests Passing
 
 ---
 
@@ -120,8 +120,7 @@ Keep this table handy when testing locally or configuring inter-service communic
 - `schema_version`: Must be `"1.0"`.
 - `request_id`: Valid UUID string.
 - `features.type`: Enum — one of `"PAYMENT"`, `"TRANSFER"`, `"CASH_OUT"`, `"DEBIT"`, `"CASH_IN"`.
-- `features.amount`: Float `> 0.0` (strictly positive).
-- `features.sender_old_balance`, `sender_new_balance`, `receiver_old_balance`, `receiver_new_balance`: Float `>= 0.0` (non-negative).
+- `features.amount`, `sender_old_balance`, `sender_new_balance`, `receiver_old_balance`, `receiver_new_balance`: Float `>= 0.0` (non-negative, finite).
 - **Important:** Do **not** send derived features (`balance_drain_ratio`, etc.); FastAPI computes the 4 derived features automatically via `ml.common.preprocessing.build_features()` to guarantee 100% training-serving parity.
 
 ### 3.3 `POST /predict` — Response Contract (`HTTP 200 OK`)
@@ -131,34 +130,25 @@ Keep this table handy when testing locally or configuring inter-service communic
   "schema_version": "1.0",
   "request_id": "550e8400-e29b-41d4-a716-446655440002",
   "fraud_probability": 0.999997,
-  "is_fraud_predicted": true,
   "action": "BLOCK",
   "uncertainty": {
     "method": "mondrian_conformal",
     "confidence_level": 0.99,
     "prediction_set": ["fraud"],
-    "set_size": 1,
-    "is_uncertain": false,
     "score": 0.000063
   },
   "explanations": [
     {
       "feature": "balance_drain_ratio",
-      "value": 1.0,
-      "contribution": 0.999985,
-      "direction": "increases_fraud_risk"
+      "contribution": 0.999985
     },
     {
       "feature": "sender_new_balance",
-      "value": 0.0,
-      "contribution": 0.01421,
-      "direction": "increases_fraud_risk"
+      "contribution": 0.01421
     },
     {
       "feature": "sender_zero_after",
-      "value": 1.0,
-      "contribution": 0.00812,
-      "direction": "increases_fraud_risk"
+      "contribution": 0.00812
     }
   ],
   "model": {
@@ -167,8 +157,7 @@ Keep this table handy when testing locally or configuring inter-service communic
     "stage": "Production",
     "alias": "production"
   },
-  "inference_ms": 14.379,
-  "timestamp": "2026-11-05T22:54:23.112045Z"
+  "inference_ms": 14.379
 }
 ```
 
@@ -253,7 +242,7 @@ The serving container is ready for Phase 9 Locust load testing (`ml/load-tests/`
 ```mermaid
 flowchart TD
     subgraph CI ["1. GitHub Actions CI (Pull Request — Ephemeral VM)"]
-        CI1["Run ruff & pytest ml/ (70 unit/integration tests)"]
+        CI1["Run ruff & pytest ml/ (72 unit/integration tests)"]
         CI2["Optional: Start ephemeral compose stack in runner"]
         CI3["Run populate_mlflow -> validate_gate -> promote_model"]
         CI4["Destroy VM after job completes (Proves code & gate validity)"]
@@ -270,7 +259,7 @@ flowchart TD
 ```
 
 ### 6.2 GitHub Actions CI Integration Snippet
-In `.github/workflows/ci.yml`, the `ml-services` job runs `pytest ml/ -v` (which executes all 70 tests across `ml/training/tests`, `ml/pipeline/tests`, and `ml/serving/tests`). To also run an end-to-end MLOps Quality Gate check in CI:
+In `.github/workflows/ci.yml`, the `ml-services` job runs `pytest ml/ -v` (which executes all 72 tests across `ml/training/tests`, `ml/pipeline/tests`, and `ml/serving/tests`). To also run an end-to-end MLOps Quality Gate check in CI:
 
 ```yaml
       - name: Run MLOps Smoke Pipeline & Quality Gate Check
@@ -305,6 +294,7 @@ spec:
             - /bin/sh
             - -c
             - |
+              python -m ml.pipeline.fetch_model &&
               python -m ml.pipeline.populate_mlflow --tracking-uri http://mlflow:5000 &&
               python -m ml.pipeline.validate_gate --alias candidate --tracking-uri http://mlflow:5000 &&
               python -m ml.pipeline.promote_model --from-alias candidate --to-alias staging --tracking-uri http://mlflow:5000 &&
@@ -325,7 +315,7 @@ spec:
                   name: minio-credentials
                   key: root-password
 ```
-*(Note: If running `ml.pipeline` inside the container image, ensure `COPY ml/pipeline ./ml/pipeline`, `COPY ml/training/results ./ml/training/results`, and `COPY ml/training/package ./ml/training/package` are included or mounted).*
+*(Note: [`ml/serving/Dockerfile`](ml/serving/Dockerfile) copies `ml/common`, `ml/pipeline`, `ml/training/results`, `ml/training/package`, and `ml/serving` and pre-creates `/app/ml/data/processed` owned by UID `1001`, so `fintech-ml-serving:latest` can execute `mlflow-seed-job` directly without extra volume mounts).*
 
 #### B. Prometheus Metrics Exposed on `GET /metrics` (Port `8000`)
 Configure Prometheus to scrape `http://fintech-ml-serving:8000/metrics` every `15s`:
@@ -334,11 +324,11 @@ Configure Prometheus to scrape `http://fintech-ml-serving:8000/metrics` every `1
 | :--- | :--- | :--- | :--- |
 | `ml_http_requests_total` | Counter | `method`, `route`, `status` | Total HTTP requests handled by FastAPI |
 | `ml_http_request_duration_seconds` | Histogram | `method`, `route` | End-to-end HTTP request latency distribution |
-| `ml_predictions_total` | Counter | `action`, `model_version`, `is_uncertain` | Predictions broken down by `ALLOW`, `BLOCK`, `HUMAN_REVIEW` |
+| `ml_ready` | Gauge | *(none)* | Readiness state (`1` when `@production` model is loaded & verified, `0` otherwise) |
+| `ml_model_load_seconds` | Gauge | *(none)* | Wall-clock duration in seconds of the latest MLflow model load |
+| `ml_model_info` | Gauge | `model_name`, `version`, `stage`, `alias` | Constant `1` gauge identifying the currently active model in memory |
 | `ml_inference_duration_seconds` | Histogram | `model_version` | Pure ML + conformal scoring latency |
-| `ml_fraud_probability_distribution` | Histogram | `model_version` | Distribution of predicted $P(\text{fraud})$ |
-| `ml_uncertainty_score` | Histogram | `model_version` | Distribution of conformal uncertainty scores |
-| `ml_abstained_predictions_total` | Counter | `reason`, `model_version` | `HUMAN_REVIEW` triggers (`empty_set`, `ambiguous_set`, `high_uncertainty_score`) |
-| `ml_model_loaded_info` | Gauge | `model_name`, `model_version`, `stage`, `alias` | Active model gauge (`1` when loaded, `0` otherwise) |
-| `ml_model_load_Timestamp_seconds` | Gauge | `model_name`, `model_version` | Unix timestamp of last successful model load |
-| `ml_model_load_failures_total` | Counter | `model_name`, `alias` | Count of failed MLflow/MinIO load attempts |
+| `ml_predictions_total` | Counter | `action`, `prediction_set`, `model_version` | Predictions broken down by `ALLOW`, `BLOCK`, `HUMAN_REVIEW` and set composition |
+| `ml_human_review_requests_total` | Counter | `reason`, `model_version` | `HUMAN_REVIEW` triggers (`empty_set`, `ambiguous_set`, `high_uncertainty_score`) |
+| `ml_prediction_set_size` | Histogram | `model_version` | Distribution of conformal prediction set sizes $|\Gamma(x)| \in \{0, 1, 2\}$ |
+| `ml_uncertainty_score` | Histogram | `model_version` | Distribution of conformal uncertainty scores $\in [0, 1]$ |
