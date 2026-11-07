@@ -78,5 +78,5 @@ Given calibrated fraud probability $p_{\text{fraud}} = P(Y = 1 \mid x)$ and legi
 | **Production Alias (active serving)** | `production` (`models:/fraud-detector@production`) |
 | **Previous Alias (instant rollback)** | `previous` (`models:/fraud-detector@previous`) |
 | **Companion Artifacts** | `uncertainty_config.json`, `statistical_validation.json` |
-| **Required Logged Metrics** | `roc_auc`, `pr_auc`, `f1`, `precision`, `recall`, `mcc`, `brier_score`, `expected_review_rate`, `inference_p95_ms` |
+| **Required Logged Metrics** | `roc_auc`, `pr_auc`, `f1`, `precision`, `recall`, `mcc`, `brier_score`, `coverage_legit`, `coverage_fraud`, `expected_review_rate`, `inference_p95_ms` |
 | **Required Run Tags** | `algorithm`, `dataset_version`, `git_sha`, `seed`, `data_source` (`paysim`; `synthetic` blocked from `@production`), `uncertainty_config_sha256` |
