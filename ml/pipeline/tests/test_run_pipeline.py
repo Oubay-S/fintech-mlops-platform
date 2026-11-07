@@ -191,9 +191,35 @@ def test_populate_mlflow_strict_no_fallback_when_model_or_metrics_missing(
 
     assert populate_main(["--model-path", str(missing_model)]) == EXIT_INFRA_ERROR
 
-    # 2. _extract_champion_metrics must fail if any required metric is missing
+    # 2. _extract_champion_metrics must fail if any required metric is missing, boolean, or non-finite
     with pytest.raises(PipelineInfraError, match="Refusing to fabricate"):
         _extract_champion_metrics({"metrics_summary": {"roc_auc": 0.99}})
+
+    boolean_summary = {
+        key: True if key == "roc_auc" else 0.5
+        for key in (
+            "roc_auc",
+            "pr_auc",
+            "f1",
+            "precision",
+            "recall",
+            "mcc",
+            "brier_score",
+            "coverage_legit",
+            "coverage_fraud",
+            "expected_review_rate",
+            "inference_p95_ms",
+        )
+    }
+    with pytest.raises(PipelineInfraError, match="Refusing to fabricate"):
+        _extract_champion_metrics({"metrics_summary": boolean_summary})
+
+    non_finite_summary = {
+        **boolean_summary,
+        "roc_auc": float("inf"),
+    }
+    with pytest.raises(PipelineInfraError, match="Refusing to fabricate"):
+        _extract_champion_metrics({"metrics_summary": non_finite_summary})
 
     # 3. _extract_benchmark_metrics must not fabricate inference_p95_ms and must fail on missing model
     df = pd.DataFrame(
@@ -238,22 +264,80 @@ def test_fetch_model_extract_and_verify_archive_strict(tmp_path: Path) -> None:
     import zipfile
 
     import joblib
-    from sklearn.linear_model import LogisticRegression
+    import numpy as np
+    import pandas as pd
     from sklearn.pipeline import Pipeline
+    from xgboost import XGBClassifier
 
-    from ml.common.preprocessing import build_preprocessor
+    from ml.common.preprocessing import build_features, build_preprocessor
+    from ml.common.schema import TRANSACTION_TYPES
     from ml.pipeline.fetch_model import extract_and_verify_archive
     from ml.pipeline.mlflow_config import PipelineInfraError
 
-    # Build a valid contract pipeline and serialize to bytes
-    pipe = Pipeline(
+    # 1. Unfitted pipeline in archive MUST be rejected by load_champion_pipeline
+    unfitted_pipe = Pipeline(
         steps=[
             ("preprocessor", build_preprocessor()),
-            ("classifier", LogisticRegression()),
+            ("classifier", XGBClassifier(n_estimators=2, max_depth=2, random_state=42)),
         ]
     )
+    unfitted_buf = io.BytesIO()
+    joblib.dump({"pipeline": unfitted_pipe, "config": {}}, unfitted_buf)
+    unfitted_bytes = unfitted_buf.getvalue()
+    unfitted_inner_sha = hashlib.sha256(unfitted_bytes).hexdigest()
+
+    unfitted_zip_buf = io.BytesIO()
+    with zipfile.ZipFile(unfitted_zip_buf, "w") as zf:
+        zf.writestr(
+            "fraud-detector-paysim-v9.9.9/model/final_contract_model.joblib",
+            unfitted_bytes,
+        )
+        zf.writestr(
+            "fraud-detector-paysim-v9.9.9/SHA256SUMS",
+            f"{unfitted_inner_sha}  model/final_contract_model.joblib\n",
+        )
+    unfitted_zip_bytes = unfitted_zip_buf.getvalue()
+    out_path = tmp_path / "processed" / "final_contract_model.joblib"
+
+    with pytest.raises(PipelineInfraError, match="not fitted"):
+        extract_and_verify_archive(
+            zip_bytes=unfitted_zip_bytes,
+            expected_zip_sha256=hashlib.sha256(unfitted_zip_bytes).hexdigest(),
+            output_path=out_path,
+        )
+    assert not out_path.exists()
+
+    # 2. Build a fitted contract XGBoost pipeline covering all 5 transaction types
+    sample_rows = [
+        {
+            "type": tx_type,
+            "amount": 100.0 + idx * 10.0,
+            "sender_old_balance": 1000.0,
+            "sender_new_balance": 900.0 - idx * 10.0,
+            "receiver_old_balance": 500.0,
+            "receiver_new_balance": 600.0 + idx * 10.0,
+        }
+        for idx, tx_type in enumerate(TRANSACTION_TYPES * 2)
+    ]
+    y_sample = np.array([idx % 2 for idx in range(len(sample_rows))], dtype=int)
+    fitted_pipe = Pipeline(
+        steps=[
+            ("preprocessor", build_preprocessor()),
+            (
+                "classifier",
+                XGBClassifier(
+                    n_estimators=2,
+                    max_depth=2,
+                    random_state=42,
+                    eval_metric="logloss",
+                ),
+            ),
+        ]
+    )
+    fitted_pipe.fit(build_features(pd.DataFrame(sample_rows)), y_sample)
+
     model_buf = io.BytesIO()
-    joblib.dump({"pipeline": pipe, "config": {}}, model_buf)
+    joblib.dump({"pipeline": fitted_pipe, "config": {}}, model_buf)
     model_bytes = model_buf.getvalue()
     inner_sha = hashlib.sha256(model_bytes).hexdigest()
 
@@ -271,7 +355,6 @@ def test_fetch_model_extract_and_verify_archive_strict(tmp_path: Path) -> None:
     zip_bytes = zip_buf.getvalue()
     outer_sha = hashlib.sha256(zip_bytes).hexdigest()
 
-    out_path = tmp_path / "processed" / "final_contract_model.joblib"
     saved = extract_and_verify_archive(
         zip_bytes=zip_bytes,
         expected_zip_sha256=outer_sha,
@@ -284,7 +367,7 @@ def test_fetch_model_extract_and_verify_archive_strict(tmp_path: Path) -> None:
         "final_contract_model.joblib"
     ]
 
-    # Outer SHA-256 mismatch must fail strictly
+    # 3. Outer SHA-256 mismatch must fail strictly
     with pytest.raises(PipelineInfraError, match="Archive SHA-256 mismatch"):
         extract_and_verify_archive(
             zip_bytes=zip_bytes,

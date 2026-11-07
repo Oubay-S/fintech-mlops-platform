@@ -9,7 +9,7 @@ filenames, or checksums:
 4. Verifies the inner `model/final_contract_model.joblib` SHA-256 against `SHA256SUMS`
     inside the archive.
 5. Extracts only `final_contract_model.joblib` to `ml/data/processed/final_contract_model.joblib`
-   (without creating any extra directories) and validates the scikit-learn Pipeline.
+   (without creating any extra directories) and validates the fitted scikit-learn Pipeline.
 """
 
 from __future__ import annotations
@@ -160,12 +160,12 @@ def extract_and_verify_archive(
 
     try:
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+        names = zf.namelist()
     except Exception as exc:
         raise PipelineInfraError(
             f"Downloaded release asset is not a valid ZIP archive: {exc}"
         ) from exc
 
-    names = zf.namelist()
     model_entries = [
         n for n in names if n.replace("\\", "/").endswith(MODEL_ZIP_SUFFIX)
     ]
@@ -174,7 +174,6 @@ def extract_and_verify_archive(
             f"Release archive does not contain '{MODEL_ZIP_SUFFIX}'."
         )
     model_entry = model_entries[0]
-    model_bytes = zf.read(model_entry)
 
     # Verify inner model checksum against SHA256SUMS in the archive
     sha_entries = [n for n in names if n.replace("\\", "/").endswith(SHA256SUMS_SUFFIX)]
@@ -182,9 +181,16 @@ def extract_and_verify_archive(
         raise PipelineInfraError(
             f"Release archive is missing '{SHA256SUMS_SUFFIX}' manifest for inner file verification."
         )
-    expected_model_sha256 = _parse_inner_model_sha256(
-        zf.read(sha_entries[0]).decode("utf-8")
-    )
+
+    try:
+        model_bytes = zf.read(model_entry)
+        sha256sums_text = zf.read(sha_entries[0]).decode("utf-8")
+    except Exception as exc:
+        raise PipelineInfraError(
+            f"Failed to read or decode entries from release ZIP archive: {exc}"
+        ) from exc
+
+    expected_model_sha256 = _parse_inner_model_sha256(sha256sums_text)
     actual_model_sha256 = hashlib.sha256(model_bytes).hexdigest().lower()
     if actual_model_sha256 != expected_model_sha256:
         raise PipelineInfraError(
@@ -192,24 +198,35 @@ def extract_and_verify_archive(
             f"expected {expected_model_sha256}, got {actual_model_sha256}."
         )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        dir=str(output_path.parent),
-        prefix=".tmp_model_",
-        suffix=".joblib",
-        delete=False,
-    ) as tmp_file:
-        tmp_path = Path(tmp_file.name)
-        tmp_file.write(model_bytes)
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            dir=str(output_path.parent),
+            prefix=".tmp_model_",
+            suffix=".joblib",
+            delete=False,
+        ) as tmp_file:
+            tmp_path = Path(tmp_file.name)
+            tmp_file.write(model_bytes)
+    except Exception as exc:
+        raise PipelineInfraError(
+            f"Failed to write temporary model artifact in '{output_path.parent}': {exc}"
+        ) from exc
 
     try:
-        # Validate that the extracted file is a genuine contract Pipeline before replacing target
+        # Validate that the extracted file is a genuine fitted contract Pipeline before replacing target
         load_champion_pipeline(local_model_path=tmp_path)
         os.replace(tmp_path, output_path)
-    except Exception:
+    except PipelineInfraError:
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
         raise
+    except Exception as exc:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise PipelineInfraError(
+            f"Failed to install validated model artifact at '{output_path}': {exc}"
+        ) from exc
 
     return output_path
 
@@ -222,7 +239,14 @@ def fetch_model(
 ) -> dict[str, str]:
     """Download, verify, and extract the trained model artifact from GitHub Releases."""
     resolved_tag, zip_url, sha_url = resolve_release_assets(repo=repo, tag=tag)
-    sha_text = _http_get_bytes(sha_url, accept="text/plain").decode("utf-8")
+    raw_sha = _http_get_bytes(sha_url, accept="text/plain")
+    try:
+        sha_text = raw_sha.decode("utf-8")
+    except Exception as exc:
+        raise PipelineInfraError(
+            f"Failed to decode .sha256 checksum asset from '{sha_url}': {exc}"
+        ) from exc
+
     expected_zip_sha256 = _parse_sha256_file(sha_text)
     zip_bytes = _http_get_bytes(zip_url)
 
@@ -274,13 +298,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(report, indent=2))
         return EXIT_SUCCESS
-    except PipelineInfraError as exc:
+    except Exception as exc:  # noqa: BLE001
+        infra_exc = (
+            exc
+            if isinstance(exc, PipelineInfraError)
+            else PipelineInfraError(f"Unexpected fetch_model failure: {exc}")
+        )
         print(
             json.dumps(
                 {
                     "status": "INFRA_ERROR",
                     "exit_code": EXIT_INFRA_ERROR,
-                    "error": str(exc),
+                    "error": str(infra_exc),
                 },
                 indent=2,
             ),

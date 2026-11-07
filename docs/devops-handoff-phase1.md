@@ -9,7 +9,7 @@
 
 ## 1. Container Build & Run Contract
 
-> **Important:** The Docker build context **must be the repository root (`.`)** so that `ml/serving/Dockerfile` can copy `ml/common/`, `ml/serving/`, and `docs/api/ml-predict-openapi.yaml`.
+> **Important:** The Docker build context **must be the repository root (`.`)** so that `ml/serving/Dockerfile` can copy `ml/common/`, `ml/pipeline/`, `ml/training/{results,package}/`, `ml/serving/`, and `docs/api/ml-predict-openapi.yaml`.
 
 ```bash
 # Build production image from repository root

@@ -315,7 +315,7 @@ spec:
                   name: minio-credentials
                   key: root-password
 ```
-*(Note: If running `ml.pipeline` inside the container image, ensure `COPY ml/pipeline ./ml/pipeline`, `COPY ml/training/results ./ml/training/results`, and `COPY ml/training/package ./ml/training/package` are included or mounted).*
+*(Note: [`ml/serving/Dockerfile`](ml/serving/Dockerfile) copies `ml/common`, `ml/pipeline`, `ml/training/results`, `ml/training/package`, and `ml/serving` and pre-creates `/app/ml/data/processed` owned by UID `1001`, so `fintech-ml-serving:latest` can execute `mlflow-seed-job` directly without extra volume mounts).*
 
 #### B. Prometheus Metrics Exposed on `GET /metrics` (Port `8000`)
 Configure Prometheus to scrape `http://fintech-ml-serving:8000/metrics` every `15s`:
@@ -326,7 +326,7 @@ Configure Prometheus to scrape `http://fintech-ml-serving:8000/metrics` every `1
 | `ml_http_request_duration_seconds` | Histogram | `method`, `route` | End-to-end HTTP request latency distribution |
 | `ml_ready` | Gauge | *(none)* | Readiness state (`1` when `@production` model is loaded & verified, `0` otherwise) |
 | `ml_model_load_seconds` | Gauge | *(none)* | Wall-clock duration in seconds of the latest MLflow model load |
-| `ml_model_info` | Gauge | `model_name`, `version`, `alias`, `algorithm` | Constant `1` gauge identifying the currently active model in memory |
+| `ml_model_info` | Gauge | `model_name`, `version`, `stage`, `alias` | Constant `1` gauge identifying the currently active model in memory |
 | `ml_inference_duration_seconds` | Histogram | `model_version` | Pure ML + conformal scoring latency |
 | `ml_predictions_total` | Counter | `action`, `prediction_set`, `model_version` | Predictions broken down by `ALLOW`, `BLOCK`, `HUMAN_REVIEW` and set composition |
 | `ml_human_review_requests_total` | Counter | `reason`, `model_version` | `HUMAN_REVIEW` triggers (`empty_set`, `ambiguous_set`, `high_uncertainty_score`) |
