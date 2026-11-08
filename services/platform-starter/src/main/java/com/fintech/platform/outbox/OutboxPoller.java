@@ -39,20 +39,25 @@ public class OutboxPoller {
     @Scheduled(fixedDelayString = "${app.outbox.poller.fixed-delay-ms:1000}")
     @Transactional
     public void pollAndPublish() {
-        List<OutboxEvent> pending = outboxRepository.findPendingEvents(PageRequest.of(0, BATCH_SIZE));
+        // Evict expired backoff intervals
+        Instant now = Instant.now();
+        retrySchedule.entrySet().removeIf(entry -> now.isAfter(entry.getValue()));
+
+        // Query eligible rows: exclude backed-off IDs to prevent head-of-line starvation
+        List<OutboxEvent> pending;
+        if (retrySchedule.isEmpty()) {
+            pending = outboxRepository.findPendingEvents(PageRequest.of(0, BATCH_SIZE));
+        } else {
+            pending = outboxRepository.findPendingEventsExcluding(retrySchedule.keySet(), PageRequest.of(0, BATCH_SIZE));
+        }
+
         if (pending.isEmpty()) {
             return;
         }
 
-        log.debug("Found {} pending outbox event(s) to publish", pending.size());
-        Instant now = Instant.now();
+        log.debug("Found {} eligible pending outbox event(s) to publish", pending.size());
 
         for (OutboxEvent event : pending) {
-            Instant nextRetry = retrySchedule.get(event.getEventId());
-            if (nextRetry != null && now.isBefore(nextRetry)) {
-                continue; // Backoff interval not yet elapsed
-            }
-
             try {
                 outboxPublisher.publish(event);
                 event.setDeliveredAt(Instant.now());

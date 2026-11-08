@@ -33,7 +33,6 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
-    private final RefreshTokenService refreshTokenService;
     private final LoginAttemptRepository loginAttemptRepository;
     private final LoginAttemptService loginAttemptService;
     private final ServiceClientRepository serviceClientRepository;
@@ -53,7 +52,6 @@ public class AuthService {
     public AuthService(
             UserRepository userRepository,
             RefreshTokenRepository refreshTokenRepository,
-            RefreshTokenService refreshTokenService,
             LoginAttemptRepository loginAttemptRepository,
             LoginAttemptService loginAttemptService,
             ServiceClientRepository serviceClientRepository,
@@ -63,7 +61,6 @@ public class AuthService {
     ) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
-        this.refreshTokenService = refreshTokenService;
         this.loginAttemptRepository = loginAttemptRepository;
         this.loginAttemptService = loginAttemptService;
         this.serviceClientRepository = serviceClientRepository;
@@ -257,8 +254,10 @@ public class AuthService {
 
     /**
      * Rotating refresh token with reuse detection.
+     * Rollback is disabled for BusinessException so that token revocation commits
+     * immediately upon reuse detection, avoiding cross-transaction deadlocks.
      */
-    @Transactional
+    @Transactional(noRollbackFor = BusinessException.class)
     public LoginResult refreshToken(String rawRefreshToken, String ipAddress, String deviceInfo) {
         if (rawRefreshToken == null || rawRefreshToken.isBlank()) {
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "Refresh token is missing");
@@ -274,10 +273,11 @@ public class AuthService {
 
         RefreshToken token = tokenOpt.get();
 
-        // Reuse detection: If previously replaced or revoked, revoke entire user chain in an isolated transaction!
+        // Reuse detection: If previously replaced or revoked, revoke entire user chain!
+        // Because noRollbackFor = BusinessException.class, this update commits even though an exception is thrown.
         if (token.getReplacedBy() != null || token.isRevoked()) {
             log.error("ALERT: Reuse of revoked/replaced refresh token detected for user {}! Revoking all sessions.", token.getUser().getId());
-            refreshTokenService.revokeAllForUser(token.getUser());
+            refreshTokenRepository.revokeAllForUser(token.getUser(), Instant.now());
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "Token reuse detected. Session terminated.");
         }
 

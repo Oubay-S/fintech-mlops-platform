@@ -23,24 +23,41 @@ import org.springframework.security.web.SecurityFilterChain;
  * Automatically loads shared error handling, security, correlation filter, outbox, and observability.
  */
 @AutoConfiguration
-@ConditionalOnWebApplication
 @EnableScheduling
-@Import({
-        CorrelationIdFilter.class,
-        GlobalExceptionHandler.class,
-        ObservabilityConfig.class,
-        OutboxService.class,
-        OutboxPoller.class,
-        HttpOutboxPublisher.class
-})
+@Import(ObservabilityConfig.class)
 public class PlatformStarterAutoConfiguration {
 
+    /**
+     * Servlet-specific web components (Servlet filter & MVC exception advice).
+     * Protected against WebFlux/reactive environments (e.g. Spring Cloud Gateway).
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+    @Import({CorrelationIdFilter.class, GlobalExceptionHandler.class})
+    static class ServletWebConfiguration {
+    }
+
+    /**
+     * Outbox components are enabled only when JPA persistence is present.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "jakarta.persistence.EntityManagerFactory")
+    @Import({OutboxService.class, OutboxPoller.class, HttpOutboxPublisher.class})
+    static class OutboxConfiguration {
+    }
+
+    /**
+     * RabbitMQ event publishing enabled when Spring AMQP is on the classpath.
+     */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(AmqpTemplate.class)
     @Import(RabbitMqOutboxPublisher.class)
     static class RabbitMqConfiguration {
     }
 
+    /**
+     * Resource server security filter chain and service token provider.
+     */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(SecurityFilterChain.class)
     @Import({PlatformSecurityConfig.class, ServiceTokenProvider.class})

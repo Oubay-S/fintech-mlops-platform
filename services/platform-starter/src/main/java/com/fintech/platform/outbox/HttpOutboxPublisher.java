@@ -4,14 +4,18 @@ import com.fintech.platform.security.ServiceTokenProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
+
+import java.time.Duration;
 
 /**
  * Fallback OutboxPublisher implementation using plain HTTP POST to /internal/events.
@@ -29,8 +33,12 @@ public class HttpOutboxPublisher implements OutboxPublisher {
     private final RestTemplate restTemplate;
     private final ObjectProvider<ServiceTokenProvider> serviceTokenProvider;
 
+    @Autowired
     public HttpOutboxPublisher(ObjectProvider<ServiceTokenProvider> serviceTokenProvider) {
-        this.restTemplate = new RestTemplate();
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout((int) Duration.ofSeconds(3).toMillis());
+        factory.setReadTimeout((int) Duration.ofSeconds(5).toMillis());
+        this.restTemplate = new RestTemplate(factory);
         this.serviceTokenProvider = serviceTokenProvider;
     }
 
@@ -48,15 +56,11 @@ public class HttpOutboxPublisher implements OutboxPublisher {
         headers.set("X-Event-Type", event.getType());
         headers.set("X-Event-Id", event.getEventId().toString());
 
-        // Attach SERVICE bearer token if ServiceTokenProvider is configured
+        // Attach SERVICE bearer token if ServiceTokenProvider is configured; propagate on failure
         if (serviceTokenProvider != null) {
             ServiceTokenProvider provider = serviceTokenProvider.getIfAvailable();
             if (provider != null) {
-                try {
-                    headers.setBearerAuth(provider.getServiceToken());
-                } catch (Exception ex) {
-                    log.warn("Failed to obtain service token for HTTP outbox fallback: {}", ex.getMessage());
-                }
+                headers.setBearerAuth(provider.getServiceToken());
             }
         }
 
