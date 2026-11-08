@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
  */
 public enum ErrorCode {
     VALIDATION_FAILED(HttpStatus.BAD_REQUEST, "Request body or parameter validation failed"),
+    UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "Authentication failed or token invalid"),
     INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "Invalid identifier or password"),
     UNAUTHENTICATED(HttpStatus.UNAUTHORIZED, "Missing or invalid token"),
     TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "Access or refresh token expired"),
@@ -23,6 +24,9 @@ public enum ErrorCode {
     INSUFFICIENT_FUNDS(HttpStatus.UNPROCESSABLE_ENTITY, "Available balance is lower than the requested amount"),
     IDEMPOTENCY_KEY_REUSED(HttpStatus.UNPROCESSABLE_ENTITY, "Idempotency key reused with a different request payload"),
     LIMIT_EXCEEDED(HttpStatus.UNPROCESSABLE_ENTITY, "Amount exceeds system configured maximum limits"),
+    EMAIL_ALREADY_EXISTS(HttpStatus.CONFLICT, "Email address is already in use"),
+    USERNAME_TAKEN(HttpStatus.CONFLICT, "Username is already taken"),
+    PHONE_ALREADY_EXISTS(HttpStatus.CONFLICT, "Phone number is already in use"),
     ACCOUNT_LOCKED(HttpStatus.TOO_MANY_REQUESTS, "Account locked due to excessive failed attempts"),
     RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Rate limit exceeded"),
     TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Service temporarily unavailable due to downstream overload"),

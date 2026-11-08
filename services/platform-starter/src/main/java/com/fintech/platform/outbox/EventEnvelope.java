@@ -112,6 +112,20 @@ public class EventEnvelope<T> {
             this.role = role;
         }
 
+        public Actor(String id, String role) {
+            this.id = id != null && !id.isBlank() ? (isUuid(id) ? UUID.fromString(id) : null) : null;
+            this.role = role;
+        }
+
+        static boolean isUuid(String s) {
+            try {
+                UUID.fromString(s);
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
         public UUID getId() {
             return id;
         }
@@ -139,6 +153,11 @@ public class EventEnvelope<T> {
         public Resource(String type, UUID id) {
             this.type = type;
             this.id = id;
+        }
+
+        public Resource(String type, String id) {
+            this.type = type;
+            this.id = id != null && !id.isBlank() ? (Actor.isUuid(id) ? UUID.fromString(id) : null) : null;
         }
 
         public String getType() {

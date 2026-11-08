@@ -27,6 +27,7 @@ import java.util.List;
  */
 @Configuration
 @EnableMethodSecurity
+@org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(SecurityFilterChain.class)
 public class PlatformSecurityConfig {
 
     @Bean

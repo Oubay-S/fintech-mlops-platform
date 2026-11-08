@@ -14,7 +14,7 @@ import org.springframework.web.client.RestTemplate;
  * Active when 'app.outbox.publisher=http'.
  */
 @Component
-@ConditionalOnProperty(name = "app.outbox.publisher", havingValue = "http")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(OutboxPublisher.class)
 public class HttpOutboxPublisher implements OutboxPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(HttpOutboxPublisher.class);
