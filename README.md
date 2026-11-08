@@ -3,7 +3,7 @@
 > **High-Availability MLOps FinTech Platform** — A simulated real-time digital-wallet platform featuring microservices, machine learning fraud classification with conformal uncertainty quantification, Kubernetes orchestration, end-to-end CI/CD, and intelligent Prometheus/Grafana supervision.
 
 **Academic Project — LSI 2026/2027 — Final Deadline: January 10, 2027**  
-**Core Reference Document:** [APPLICATION_CONCEPTION_PLAN V2.1.md](APPLICATION_CONCEPTION_PLAN%20V2.1.md)
+**Core Reference Document:** [APPLICATION_CONCEPTION_PLAN V2.3.md](APPLICATION_CONCEPTION_PLAN%20V2.3.md)
 
 ---
 
@@ -26,7 +26,7 @@ The platform simulates a peer-to-peer digital wallet where customers can **send 
 Every monetary transaction is evaluated in real-time by a Machine Learning model served via FastAPI. The Risk Service evaluates the model prediction and its **conformal uncertainty set** to produce one of three outcomes:
 * `APPROVED` — High confidence the transaction is legitimate. Executed instantly.
 * `REJECTED` — High confidence the transaction is fraudulent. Declined instantly.
-* `PENDING_REVIEW` — Model is uncertain (`prediction_set` contains both classes or empty), amount is high, or ML service is degraded. Funds are held and routed to a **Fraud Analyst** for human review within 24 hours.
+* `PENDING_REVIEW` — Model is uncertain (`prediction_set` contains both classes or empty), near-drain ratio is high (`amount ÷ sender_old_balance ≥ 0.8`), or ML service is degraded. Funds are held and routed to a **Fraud Analyst** for human review within 24 hours.
 
 ```mermaid
 flowchart TB
@@ -108,17 +108,17 @@ All microservices have dedicated, non-overlapping ports:
 
 ## 👥 Team Roles & Task Map
 
-Detailed requirements for each role are formalized in [APPLICATION_CONCEPTION_PLAN V2.1.md](APPLICATION_CONCEPTION_PLAN%20V2.1.md) and synchronized with our [GitHub Issues #1 to #34](https://github.com/Oubay-S/fintech-mlops-platform/issues).
+Detailed requirements for each role are formalized in [APPLICATION_CONCEPTION_PLAN V2.3.md](APPLICATION_CONCEPTION_PLAN%20V2.3.md) and synchronized with our [GitHub Issues #1 to #34](https://github.com/Oubay-S/fintech-mlops-platform/issues).
 
 ### 🔹 Role 1: Backend Engineer (Spring Boot)
 * **Owned Services:** `api-gateway`, `auth-service`, `customer-service`, `transaction-service`, `risk-service` (+ shared `platform-starter`).
 * **Key Tasks:**
-  * Build the shared library `platform-starter` (RS256 JWT validation, `X-Correlation-Id`, RFC 7807 error format, outbox publisher).
-  * **Auth Service:** RS256 JWT, rotating refresh tokens in httpOnly cookies, lockout after 5 failed attempts in 15 min (`429`), outbox `UserRegistered`.
-  * **Customer Service:** Profile management, masked receiver lookup (`POST /customers/lookup`, 10 req/min).
-  * **Transaction Service:** Double-entry append-only ledger (`ledger_entries`), enforce Invariants I1-I3 (money conservation), deadlock-free locking (`SELECT ... FOR UPDATE` in ascending wallet ID order), `Idempotency-Key` header handling (UUID), 2-minute live payment requests, background reconciler (every 30s).
-  * **Risk Service:** Implement Decision Policy Rules R1 to R6, Resilience4j circuit breaker (timeout 1.5s), review case management with SLA deadline (24h).
-  * **Observability:** Expose `/actuator/health/liveness`, `/actuator/health/readiness` (DB only), and `/actuator/prometheus` on all services.
+  * Build the shared library `platform-starter` (RS256 JWT validation, `X-Correlation-Id`, RFC 7807 error format, outbox publisher, JSON logging).
+  * **Auth Service:** RS256 JWT, rotating refresh tokens in httpOnly cookies, lockout after 5 failed attempts in 15 min (`429`), outbox `UserRegistered`, staff & cash agent provisioning.
+  * **Customer Service:** Profile management, masked receiver lookup (`POST /customers/lookup`, 10 req/min), cash agent listing (`GET /customers/agents`).
+  * **Transaction Service:** Single-wallet append-only ledger (`ledger_entries`), enforce Invariants I1-I3 (money conservation), deadlock-free locking (`SELECT ... FOR UPDATE` in ascending wallet ID order), `Idempotency-Key` header handling (UUID), JSON numbers with at most 2 decimals for monetary values, 2-minute live payment requests, background reconciler (every 30s).
+  * **Risk Service:** Implement Decision Policy Rules R1 to R6 (including near-drain rule R5 with `risk.policy.review-balance-ratio` default 0.8), Resilience4j circuit breaker & ML client (connect timeout 500ms, read timeout 1500ms, budget 1.5s, request_id echo validation), review case management with SLA deadline (24h), highest balance ratio prioritization.
+  * **Observability:** Expose `/actuator/health/liveness`, `/actuator/health/readiness` (DB only), and `/actuator/prometheus` on all services (contract metrics including `BALANCE_RATIO_HIGH` reason tag).
 * **GitHub Issues:** [#1](https://github.com/Oubay-S/fintech-mlops-platform/issues/1), [#2](https://github.com/Oubay-S/fintech-mlops-platform/issues/2), [#3](https://github.com/Oubay-S/fintech-mlops-platform/issues/3), [#4](https://github.com/Oubay-S/fintech-mlops-platform/issues/4), [#5](https://github.com/Oubay-S/fintech-mlops-platform/issues/5), [#6](https://github.com/Oubay-S/fintech-mlops-platform/issues/6), [#7](https://github.com/Oubay-S/fintech-mlops-platform/issues/7).
 
 ### 🔹 Role 2: Frontend & Delivery Engineer (React + Reporting)
@@ -158,7 +158,7 @@ Detailed requirements for each role are formalized in [APPLICATION_CONCEPTION_PL
 * **Owned Components:** `ml/serving/`, `ml/pipeline/`.
 * **Key Tasks:**
   * Deliver formal OpenAPI contract `POST /predict` in Week 1 (`docs/api/ml-predict-openapi.yaml`).
-  * Build FastAPI microservice implementing `POST /predict` (target p95 latency < 300 ms), `GET /health/live`, `GET /health/ready` (returns 200 OK only after model is loaded), `GET /metrics`, `GET /model-info`, `GET /viz/{method}`.
+  * **FastAPI ML Serving:** Implement `POST /predict` (target p95 latency < 300 ms, payload with `schema_version`, `request_id`, 6 frozen PaySim features, echoing `request_id` in response), `GET /health/live`, `GET /health/ready` (returns 200 OK only after model is loaded), `GET /metrics`, `GET /model-info`, `GET /viz/{method}`.
   * Automate MLflow pipeline: Training -> Evaluation -> Statistical Validation -> Model Registry (`models:/fraud-detector/Production`).
   * Integrate dynamic model loading from MLflow Model Registry.
   * Build Grafana dashboard for ML inference latency and uncertainty distributions.
@@ -274,7 +274,7 @@ fintech-mlops-platform/
 │   ├── api-gateway/        # Spring Cloud Gateway (:8080)
 │   ├── auth-service/       # Authentication, RS256 JWKS (:8081)
 │   ├── customer-service/   # Profiles & receiver lookup (:8082)
-│   ├── transaction-service/# Wallets, double-entry ledger, transfers (:8083)
+│   ├── transaction-service/# Wallets, append-only ledger, transfers (:8083)
 │   ├── risk-service/       # Decision policy R1-R6, review queue (:8084)
 │   ├── notification-service/# Notifications & Mailpit email (:8085)
 │   └── audit-service/      # Append-only audit trail (:8086)
@@ -310,7 +310,7 @@ fintech-mlops-platform/
 
 ## 📚 Documentation Index
 
-1. **Architecture & System Specification:** [APPLICATION_CONCEPTION_PLAN V2.1.md](APPLICATION_CONCEPTION_PLAN%20V2.1.md)
+1. **Architecture & System Specification:** [APPLICATION_CONCEPTION_PLAN V2.3.md](APPLICATION_CONCEPTION_PLAN%20V2.3.md)
 2. **Technical Conventions & Port Standards:** [docs/conventions.md](docs/conventions.md)
 3. **Team Workflow & Pull Request Guide:** [docs/workflow-guide.md](docs/workflow-guide.md)
 4. **Local Infrastructure Guide:** [docs/local-dev.md](docs/local-dev.md)

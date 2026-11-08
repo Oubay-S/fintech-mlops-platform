@@ -1,0 +1,56 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: auth-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5433/fintech?currentSchema=auth}
+    username: ${SPRING_DATASOURCE_USERNAME:fintech_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:changeme_postgres}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: auth
+  flyway:
+    enabled: true
+    schemas: auth
+    default-schema: auth
+    baseline-on-migrate: true
+
+# JWT and Security Settings
+app:
+  jwt:
+    issuer: fintech-auth-service
+    audience: fintech-platform
+    access-token-ttl-seconds: 900 # 15 minutes
+    refresh-token-ttl-seconds: 604800 # 7 days
+    # Optional base64-encoded RSA PEM keys; if blank, an in-memory keypair is generated on startup
+    private-key-pem: ""
+    public-key-pem: ""
+  security:
+    lockout:
+      max-failed-attempts: 5
+      window-minutes: 15
+    cookie-secure: true # Default true (HTTPS/production). Override to false in local dev via env var or dev profile.
+    trust-proxy-headers: false # Set to true only behind trusted reverse proxies/ingress to prevent X-Forwarded-For spoofing
+    service-token:
+      enabled: false # auth-service issues tokens, doesn't need to consume internal tokens for itself
+
+# Observability
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    tags:
+      service: ${spring.application.name}
+

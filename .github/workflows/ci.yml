@@ -83,19 +83,24 @@ jobs:
 
       - name: Build and Test Microservices
         run: |
-          echo "Scanning services for Maven pom.xml files..."
-          FOUND=0
-          while IFS= read -r pom; do
-            [ -z "$pom" ] && continue
-            DIR=$(dirname "$pom")
-            echo "::group::Building $DIR"
-            echo "Running 'mvn -B clean verify' in $DIR..."
-            mvn -B clean verify --file "$pom"
-            echo "::endgroup::"
-            FOUND=1
-          done < <(find services -name "pom.xml" -type f)
-          if [ "$FOUND" -eq 0 ]; then
-            echo "No pom.xml found in services directory yet. Skipping Maven verify."
+          if [ -f "services/pom.xml" ]; then
+            echo "Building multi-module Maven parent in services/pom.xml..."
+            mvn -B clean verify --file services/pom.xml
+          else
+            echo "Scanning services for Maven pom.xml files..."
+            FOUND=0
+            while IFS= read -r pom; do
+              [ -z "$pom" ] && continue
+              DIR=$(dirname "$pom")
+              echo "::group::Building $DIR"
+              echo "Running 'mvn -B clean verify' in $DIR..."
+              mvn -B clean verify --file "$pom"
+              echo "::endgroup::"
+              FOUND=1
+            done < <(find services -name "pom.xml" -type f)
+            if [ "$FOUND" -eq 0 ]; then
+              echo "No pom.xml found in services directory yet. Skipping Maven verify."
+            fi
           fi
 
   # ==========================================
