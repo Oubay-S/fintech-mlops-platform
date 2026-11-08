@@ -39,13 +39,9 @@ public class PlatformStarterAutoConfiguration {
 
     /**
      * Outbox components are enabled only when JPA persistence is present.
-     * Registers OutboxEvent entity and OutboxRepository automatically so consuming services
-     * do not need manual @EntityScan and @EnableJpaRepositories for platform outbox packages.
      */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = "jakarta.persistence.EntityManagerFactory")
-    @org.springframework.boot.autoconfigure.domain.EntityScan(basePackages = "com.fintech.platform.outbox")
-    @org.springframework.data.jpa.repository.config.EnableJpaRepositories(basePackages = "com.fintech.platform.outbox")
     @Import({OutboxService.class, OutboxPoller.class, HttpOutboxPublisher.class})
     static class OutboxConfiguration {
     }
