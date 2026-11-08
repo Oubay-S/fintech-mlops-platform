@@ -2,22 +2,27 @@ package com.fintech.platform.outbox;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 /**
  * Fallback OutboxPublisher implementation using plain HTTP POST to /internal/events.
- * Active when 'app.outbox.publisher=http'.
+ * Active when RabbitMQ is absent or fallback is selected.
  */
 @Component
-@org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(OutboxPublisher.class)
+@ConditionalOnMissingBean(OutboxPublisher.class)
 public class HttpOutboxPublisher implements OutboxPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(HttpOutboxPublisher.class);
+
+    @Value("${app.outbox.http.endpoint:http://localhost:8080/internal/events}")
+    private String endpoint;
 
     private final RestTemplate restTemplate;
 
@@ -25,16 +30,26 @@ public class HttpOutboxPublisher implements OutboxPublisher {
         this.restTemplate = new RestTemplate();
     }
 
+    public HttpOutboxPublisher(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
+
     @Override
     public void publish(OutboxEvent event) {
-        log.debug("HTTP fallback: delivering outbox event [{}] to /internal/events", event.getEventId());
+        log.debug("HTTP fallback: delivering outbox event [{}] to {}", event.getEventId(), endpoint);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Event-Type", event.getType());
+        headers.set("X-Event-Id", event.getEventId().toString());
 
         HttpEntity<String> request = new HttpEntity<>(event.getPayload(), headers);
-        // Note: Target service URL is resolved per destination or via internal routing
-        // This fallback ensures services can run without RabbitMQ in minimal environments
+        
+        // Execute POST and propagate failures to prevent false delivery acknowledgment
+        ResponseEntity<Void> response = restTemplate.postForEntity(endpoint, request, Void.class);
+        if (!response.getStatusCode().is2xxSuccessful()) {
+            throw new IllegalStateException("HTTP outbox delivery failed with HTTP status: " + response.getStatusCode());
+        }
     }
 }
 

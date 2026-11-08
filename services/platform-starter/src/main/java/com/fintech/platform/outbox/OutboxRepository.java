@@ -1,8 +1,12 @@
 package com.fintech.platform.outbox;
 
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.QueryHint;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.QueryHints;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -20,8 +24,14 @@ public interface OutboxRepository extends JpaRepository<OutboxEvent, Long> {
 
     /**
      * Finds pending outbox events ordered by created_at.
-     * Note: In native Postgres queries, FOR UPDATE SKIP LOCKED is used in pollers.
+     * Uses PESSIMISTIC_WRITE with lock timeout -2 (SKIP LOCKED) to ensure multi-replica safety
+     * without blocking or duplicate concurrent processing.
      */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @QueryHints({
+            @QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"),
+            @QueryHint(name = "org.hibernate.lockOptions.skipLocked", value = "true")
+    })
     @Query("SELECT o FROM OutboxEvent o WHERE o.deliveredAt IS NULL ORDER BY o.createdAt ASC")
     List<OutboxEvent> findPendingEvents(Pageable pageable);
 }

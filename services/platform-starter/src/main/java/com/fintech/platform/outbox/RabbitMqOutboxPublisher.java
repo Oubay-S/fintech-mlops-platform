@@ -3,7 +3,12 @@ package com.fintech.platform.outbox;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.AmqpTemplate;
+import org.springframework.amqp.core.TopicExchange;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.stereotype.Component;
 
 /**
@@ -13,7 +18,7 @@ import org.springframework.stereotype.Component;
  * Routing key format: <service>.<resource>.<event> (e.g. "transaction.transfer.completed")
  */
 @Component
-@org.springframework.boot.autoconfigure.condition.ConditionalOnClass(AmqpTemplate.class)
+@ConditionalOnClass(AmqpTemplate.class)
 @ConditionalOnProperty(name = "app.outbox.publisher", havingValue = "rabbitmq", matchIfMissing = true)
 public class RabbitMqOutboxPublisher implements OutboxPublisher {
 
@@ -24,6 +29,20 @@ public class RabbitMqOutboxPublisher implements OutboxPublisher {
 
     public RabbitMqOutboxPublisher(AmqpTemplate amqpTemplate) {
         this.amqpTemplate = amqpTemplate;
+    }
+
+    /**
+     * Declares the durable topic exchange 'fintech.events' if Spring AMQP / RabbitAdmin is present.
+     * Guarantees that the exchange exists on broker startup, preventing NOT_FOUND channel errors.
+     */
+    @Configuration
+    @ConditionalOnClass(TopicExchange.class)
+    static class RabbitMqExchangeConfiguration {
+        @Bean
+        @ConditionalOnMissingBean(name = "fintechEventsExchange")
+        public TopicExchange fintechEventsExchange() {
+            return new TopicExchange(EXCHANGE_NAME, true, false);
+        }
     }
 
     @Override
