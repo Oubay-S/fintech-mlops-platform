@@ -41,13 +41,13 @@ public class AuthService {
     private final OutboxService outboxService;
 
     @Value("${app.security.lockout.max-failed-attempts:5}")
-    private int maxFailedAttempts;
+    private int maxFailedAttempts = 5;
 
     @Value("${app.security.lockout.window-minutes:15}")
-    private int lockoutWindowMinutes;
+    private int lockoutWindowMinutes = 15;
 
     @Value("${app.jwt.refresh-token-ttl-seconds:604800}") // 7 days
-    private long refreshTokenTtlSeconds;
+    private long refreshTokenTtlSeconds = 604800;
 
     public AuthService(
             UserRepository userRepository,
@@ -137,6 +137,10 @@ public class AuthService {
      */
     @Transactional
     public User createStaffOrAgentUser(AdminCreateUserRequest request, UUID adminActorId) {
+        if (request.role() != Role.AGENT && request.role() != Role.ANALYST && request.role() != Role.ADMIN) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "Staff provisioning only allows AGENT, ANALYST, or ADMIN roles");
+        }
+
         if (userRepository.existsByEmail(request.email())) {
             throw new BusinessException(ErrorCode.EMAIL_ALREADY_EXISTS, "Email is already registered: " + request.email());
         }
@@ -335,6 +339,8 @@ public class AuthService {
 
     /**
      * Machine-to-machine service token generation.
+     * The SERVICE role is always hardcoded regardless of what the DB row stores,
+     * preventing a misconfigured client row from producing an elevated token.
      */
     @Transactional(readOnly = true)
     public ServiceTokenResponse issueServiceToken(ServiceTokenRequest request) {
@@ -346,7 +352,15 @@ public class AuthService {
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "Invalid client credentials");
         }
 
-        String token = jwtService.issueServiceToken(client.getClientId(), client.getRole());
+        // Guard: reject DB rows that are misconfigured with a non-SERVICE role
+        if (!"SERVICE".equals(client.getRole())) {
+            log.error("Service client {} has unexpected role '{}' in DB; rejecting token issuance.",
+                    client.getClientId(), client.getRole());
+            throw new BusinessException(ErrorCode.UNAUTHORIZED, "Invalid client credentials");
+        }
+
+        // Always issue SERVICE role — never copy the DB column into the token to prevent elevation
+        String token = jwtService.issueServiceToken(client.getClientId(), "SERVICE");
         return ServiceTokenResponse.of(token, 300);
     }
 

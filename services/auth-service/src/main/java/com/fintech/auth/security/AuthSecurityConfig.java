@@ -1,5 +1,6 @@
 package com.fintech.auth.security;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
@@ -11,8 +12,13 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtClaimNames;
+import org.springframework.security.oauth2.jwt.JwtClaimValidator;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.web.SecurityFilterChain;
@@ -28,13 +34,34 @@ public class AuthSecurityConfig {
 
     private final JwtService jwtService;
 
+    @Value("${app.jwt.issuer:fintech-auth-service}")
+    private String issuer;
+
+    @Value("${app.jwt.audience:fintech-platform}")
+    private String audience;
+
     public AuthSecurityConfig(JwtService jwtService) {
         this.jwtService = jwtService;
     }
 
     @Bean
     public JwtDecoder jwtDecoder() {
-        return NimbusJwtDecoder.withPublicKey(jwtService.getPublicKey()).build();
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withPublicKey(jwtService.getPublicKey()).build();
+
+        // Validate issuer (iss claim must match what this service issues)
+        OAuth2TokenValidator<Jwt> withIssuer = JwtValidators.createDefaultWithIssuer(issuer);
+
+        // Validate audience (aud claim must contain the configured audience)
+        OAuth2TokenValidator<Jwt> withAudience = new JwtClaimValidator<List<String>>(
+                JwtClaimNames.AUD,
+                aud -> aud != null && aud.contains(audience)
+        );
+
+        // Combine: both validators must pass
+        OAuth2TokenValidator<Jwt> combined = new DelegatingOAuth2TokenValidator<>(withIssuer, withAudience);
+        decoder.setJwtValidator(combined);
+
+        return decoder;
     }
 
     @Bean

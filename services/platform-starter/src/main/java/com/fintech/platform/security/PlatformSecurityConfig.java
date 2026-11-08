@@ -72,8 +72,7 @@ public class PlatformSecurityConfig {
                 .build();
     }
 
-    @Bean
-    public Converter<Jwt, ? extends AbstractAuthenticationToken> jwtAuthenticationConverter() {
+    private Converter<Jwt, ? extends AbstractAuthenticationToken> jwtAuthenticationConverter() {
         return jwt -> {
             Collection<GrantedAuthority> authorities = extractAuthorities(jwt);
             return new JwtAuthenticationToken(jwt, authorities, jwt.getSubject());

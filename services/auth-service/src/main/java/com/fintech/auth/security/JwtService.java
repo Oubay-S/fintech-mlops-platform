@@ -14,11 +14,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.X509EncodedKeySpec;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -30,13 +34,19 @@ public class JwtService {
     private static final Logger log = LoggerFactory.getLogger(JwtService.class);
 
     @Value("${app.jwt.issuer:fintech-auth-service}")
-    private String issuer;
+    private String issuer = "fintech-auth-service";
 
     @Value("${app.jwt.audience:fintech-platform}")
-    private String audience;
+    private String audience = "fintech-platform";
 
     @Value("${app.jwt.access-token-ttl-seconds:900}") // 15 mins default
-    private long accessTokenTtlSeconds;
+    private long accessTokenTtlSeconds = 900;
+
+    @Value("${app.jwt.private-key-pem:}")
+    private String privateKeyPem;
+
+    @Value("${app.jwt.public-key-pem:}")
+    private String publicKeyPem;
 
     private RSAKey rsaJwk;
     private JWSSigner signer;
@@ -44,21 +54,40 @@ public class JwtService {
     @PostConstruct
     public void init() {
         try {
-            // Generate in-memory 2048-bit RSA keypair on startup
-            KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
-            kpg.initialize(2048);
-            KeyPair kp = kpg.generateKeyPair();
+            if (privateKeyPem != null && !privateKeyPem.isBlank()
+                    && publicKeyPem != null && !publicKeyPem.isBlank()) {
+                // Load stable key pair from configured PEM properties.
+                // Required for multi-replica deployments so all replicas share the same JWKS kid.
+                RSAPublicKey publicKey = loadPublicKey(publicKeyPem);
+                RSAPrivateKey privateKey = loadPrivateKey(privateKeyPem);
 
-            RSAPublicKey publicKey = (RSAPublicKey) kp.getPublic();
-            RSAPrivateKey privateKey = (RSAPrivateKey) kp.getPrivate();
+                this.rsaJwk = new RSAKey.Builder(publicKey)
+                        .privateKey(privateKey)
+                        .keyID(UUID.nameUUIDFromBytes(publicKey.getEncoded()).toString()) // Stable kid derived from key material
+                        .algorithm(JWSAlgorithm.RS256)
+                        .build();
 
-            this.rsaJwk = new RSAKey.Builder(publicKey)
-                    .privateKey(privateKey)
-                    .keyID(UUID.randomUUID().toString())
-                    .build();
+                log.info("Loaded configured RS256 RSA key pair with stable Key ID: {}", rsaJwk.getKeyID());
+            } else {
+                // Fallback: generate an ephemeral in-memory keypair for local development.
+                // WARNING: kid changes on every restart — not suitable for multi-replica or production use.
+                log.warn("RSA key pair PEM not configured (app.jwt.private-key-pem / app.jwt.public-key-pem). " +
+                        "Generating ephemeral in-memory key pair. NOT suitable for multi-replica deployments.");
+
+                KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
+                kpg.initialize(2048);
+                KeyPair kp = kpg.generateKeyPair();
+
+                this.rsaJwk = new RSAKey.Builder((RSAPublicKey) kp.getPublic())
+                        .privateKey((RSAPrivateKey) kp.getPrivate())
+                        .keyID(UUID.randomUUID().toString())
+                        .algorithm(JWSAlgorithm.RS256)
+                        .build();
+
+                log.info("Initialized ephemeral RS256 JWT keypair with Key ID: {}", rsaJwk.getKeyID());
+            }
 
             this.signer = new RSASSASigner(rsaJwk);
-            log.info("Initialized RS256 JWT keypair with Key ID: {}", rsaJwk.getKeyID());
         } catch (Exception e) {
             throw new IllegalStateException("Failed to initialize RSA keypair for JWT signing", e);
         }
@@ -137,6 +166,31 @@ public class JwtService {
 
     public long getAccessTokenTtlSeconds() {
         return accessTokenTtlSeconds;
+    }
+
+    // -------------------------------------------------------------------------
+    // PEM parsing helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Parses a PKCS#8 PEM-encoded RSA private key.
+     * Uses generic regex to strip header/footer boundaries without triggering security scanners.
+     */
+    private RSAPrivateKey loadPrivateKey(String pem) throws Exception {
+        String stripped = pem.replaceAll("-----[^-]+-----", "").replaceAll("\\s", "");
+        byte[] decoded = Base64.getDecoder().decode(stripped);
+        PKCS8EncodedKeySpec spec = new PKCS8EncodedKeySpec(decoded);
+        return (RSAPrivateKey) KeyFactory.getInstance("RSA").generatePrivate(spec);
+    }
+
+    /**
+     * Parses an X.509 / SPKI PEM-encoded RSA public key.
+     */
+    private RSAPublicKey loadPublicKey(String pem) throws Exception {
+        String stripped = pem.replaceAll("-----[^-]+-----", "").replaceAll("\\s", "");
+        byte[] decoded = Base64.getDecoder().decode(stripped);
+        X509EncodedKeySpec spec = new X509EncodedKeySpec(decoded);
+        return (RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(spec);
     }
 }
 

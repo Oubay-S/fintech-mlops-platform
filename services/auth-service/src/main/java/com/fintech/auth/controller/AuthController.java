@@ -8,6 +8,7 @@ import com.fintech.auth.dto.RegisterRequest;
 import com.fintech.auth.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
@@ -21,6 +22,22 @@ import java.time.Duration;
 public class AuthController {
 
     private final AuthService authService;
+
+    /**
+     * Controls the Secure flag on the refresh_token cookie.
+     * Set app.security.cookie-secure=true in production (TLS/HTTPS environments).
+     * Defaults to false for local development.
+     */
+    @Value("${app.security.cookie-secure:false}")
+    private boolean cookieSecure;
+
+    /**
+     * Determines whether X-Forwarded-For is trusted.
+     * When false (default), the direct remote address is used to prevent attackers from
+     * spoofing client IPs to bypass the per-IP lockout.
+     */
+    @Value("${app.security.trust-proxy-headers:false}")
+    private boolean trustProxyHeaders;
 
     public AuthController(AuthService authService) {
         this.authService = authService;
@@ -81,7 +98,7 @@ public class AuthController {
     private ResponseCookie createRefreshTokenCookie(String token, Duration maxAge) {
         return ResponseCookie.from("refresh_token", token)
                 .httpOnly(true)
-                .secure(false) // Set to true in TLS/production environments
+                .secure(cookieSecure) // Controlled by app.security.cookie-secure (true in production/TLS)
                 .sameSite("Strict")
                 .path("/")
                 .maxAge(maxAge)
@@ -89,11 +106,15 @@ public class AuthController {
     }
 
     private String resolveClientIp(HttpServletRequest request) {
+        String remoteAddr = request.getRemoteAddr() != null ? request.getRemoteAddr() : "127.0.0.1";
+        if (!trustProxyHeaders) {
+            return remoteAddr;
+        }
         String xForwardedFor = request.getHeader("X-Forwarded-For");
         if (xForwardedFor != null && !xForwardedFor.isBlank()) {
             return xForwardedFor.split(",")[0].trim();
         }
-        return request.getRemoteAddr() != null ? request.getRemoteAddr() : "127.0.0.1";
+        return remoteAddr;
     }
 }
 
