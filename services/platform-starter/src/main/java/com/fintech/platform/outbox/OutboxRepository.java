@@ -29,8 +29,7 @@ public interface OutboxRepository extends JpaRepository<OutboxEvent, Long> {
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @QueryHints({
-            @QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"),
-            @QueryHint(name = "org.hibernate.lockOptions.skipLocked", value = "true")
+            @QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2")
     })
     @Query("SELECT o FROM OutboxEvent o WHERE o.deliveredAt IS NULL ORDER BY o.createdAt ASC")
     List<OutboxEvent> findPendingEvents(Pageable pageable);

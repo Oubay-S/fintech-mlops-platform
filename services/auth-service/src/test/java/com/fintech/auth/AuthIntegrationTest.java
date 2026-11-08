@@ -90,9 +90,29 @@ class AuthIntegrationTest {
         assertThat(rotatedCookie).isNotNull();
         assertThat(rotatedCookie.getValue()).isNotEqualTo(refreshCookie.getValue());
 
-        // 6. Logout
-        mockMvc.perform(post("/auth/logout")
+        // 6. Token reuse detection: presenting the already-rotated token must trigger 401 and chain revocation
+        mockMvc.perform(post("/auth/refresh")
+                        .cookie(refreshCookie))
+                .andExpect(status().isUnauthorized());
+
+        // The successor rotated token must now also be rejected because reuse revokes the entire user chain
+        mockMvc.perform(post("/auth/refresh")
                         .cookie(rotatedCookie))
+                .andExpect(status().isUnauthorized());
+
+        // 7. Login again after chain revocation and verify logout
+        MvcResult reLoginResult = mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(loginReq)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        Cookie freshCookie = reLoginResult.getResponse().getCookie("refresh_token");
+        assertThat(freshCookie).isNotNull();
+
+        // 8. Logout with valid fresh token
+        mockMvc.perform(post("/auth/logout")
+                        .cookie(freshCookie))
                 .andExpect(status().isOk())
                 .andExpect(cookie().maxAge("refresh_token", 0));
     }

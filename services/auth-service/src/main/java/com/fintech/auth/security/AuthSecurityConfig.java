@@ -70,6 +70,10 @@ public class AuthSecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint(com.fintech.platform.security.SecurityProblemSupport.authenticationEntryPoint())
+                        .accessDeniedHandler(com.fintech.platform.security.SecurityProblemSupport.accessDeniedHandler())
+                )
                 .authorizeHttpRequests(auth -> auth
                         // Public auth endpoints
                         .requestMatchers("/auth/**").permitAll()
@@ -77,9 +81,12 @@ public class AuthSecurityConfig {
                         // Public actuator & docs
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                        // Admin and internal endpoints
+                        // Internal token issuance endpoint is public (clients authenticate with client_secret)
+                        .requestMatchers("/internal/auth/service-token").permitAll()
+                        // All other internal endpoints require SERVICE authority
+                        .requestMatchers("/internal/**").hasRole("SERVICE")
+                        // Admin endpoints
                         .requestMatchers("/admin/**").hasRole("ADMIN")
-                        .requestMatchers("/internal/**").permitAll() // Service validates credentials directly
                         .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2

@@ -12,6 +12,8 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Service;
 
 import java.security.KeyFactory;
@@ -48,8 +50,18 @@ public class JwtService {
     @Value("${app.jwt.public-key-pem:}")
     private String publicKeyPem;
 
+    private final Environment environment;
+
     private RSAKey rsaJwk;
     private JWSSigner signer;
+
+    public JwtService() {
+        this.environment = null;
+    }
+
+    public JwtService(Environment environment) {
+        this.environment = environment;
+    }
 
     @PostConstruct
     public void init() {
@@ -69,6 +81,12 @@ public class JwtService {
 
                 log.info("Loaded configured RS256 RSA key pair with stable Key ID: {}", rsaJwk.getKeyID());
             } else {
+                // Fail closed in production environments
+                if (environment != null && environment.acceptsProfiles(Profiles.of("prod", "production"))) {
+                    throw new IllegalStateException("Production environment requires persistent RSA keys! " +
+                            "Configure app.jwt.private-key-pem and app.jwt.public-key-pem.");
+                }
+
                 // Fallback: generate an ephemeral in-memory keypair for local development.
                 // WARNING: kid changes on every restart — not suitable for multi-replica or production use.
                 log.warn("RSA key pair PEM not configured (app.jwt.private-key-pem / app.jwt.public-key-pem). " +

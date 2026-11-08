@@ -36,7 +36,7 @@ app:
     lockout:
       max-failed-attempts: 5
       window-minutes: 15
-    cookie-secure: false # Set to true in production / TLS environments (e.g. via K8s env var APP_SECURITY_COOKIE-SECURE=true)
+    cookie-secure: true # Default true (HTTPS/production). Override to false in local dev via env var or dev profile.
     trust-proxy-headers: false # Set to true only behind trusted reverse proxies/ingress to prevent X-Forwarded-For spoofing
     service-token:
       enabled: false # auth-service issues tokens, doesn't need to consume internal tokens for itself

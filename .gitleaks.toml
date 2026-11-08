@@ -11,9 +11,6 @@ paths = [
     '''README\.md$''',
     '''APPLICATION_CONCEPTION_PLAN.*\.md$''',
 ]
-commits = [
-    "2e941fe920a5f5b6bba9a1521c58cf58166dea7b",
-]
 regexes = [
     '''changeme_.*''',
     '''minioadmin''',

@@ -42,6 +42,8 @@ class AuthServiceTest {
     @Mock
     private RefreshTokenRepository refreshTokenRepository;
     @Mock
+    private RefreshTokenService refreshTokenService;
+    @Mock
     private LoginAttemptRepository loginAttemptRepository;
     @Mock
     private LoginAttemptService loginAttemptService;
@@ -62,6 +64,7 @@ class AuthServiceTest {
         authService = new AuthService(
                 userRepository,
                 refreshTokenRepository,
+                refreshTokenService,
                 loginAttemptRepository,
                 loginAttemptService,
                 serviceClientRepository,

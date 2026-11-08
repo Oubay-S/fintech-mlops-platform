@@ -39,12 +39,32 @@ public class PlatformSecurityConfig {
 
     /**
      * Provides a default JwtDecoder when app.jwt.jwk-set-uri is configured and no other JwtDecoder exists.
+     * Enforces signature, issuer, and audience validations.
      */
     @Bean
     @ConditionalOnMissingBean(JwtDecoder.class)
     @ConditionalOnProperty(name = "app.jwt.jwk-set-uri")
-    public JwtDecoder platformJwtDecoder(@Value("${app.jwt.jwk-set-uri}") String jwkSetUri) {
-        return NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build();
+    public JwtDecoder platformJwtDecoder(
+            @Value("${app.jwt.jwk-set-uri}") String jwkSetUri,
+            @Value("${app.jwt.issuer:}") String issuer,
+            @Value("${app.jwt.audience:}") String audience) {
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build();
+        List<org.springframework.security.oauth2.core.OAuth2TokenValidator<Jwt>> validators = new ArrayList<>();
+
+        if (issuer != null && !issuer.isBlank()) {
+            validators.add(org.springframework.security.oauth2.jwt.JwtValidators.createDefaultWithIssuer(issuer));
+        }
+        if (audience != null && !audience.isBlank()) {
+            validators.add(new org.springframework.security.oauth2.jwt.JwtClaimValidator<List<String>>(
+                    org.springframework.security.oauth2.jwt.JwtClaimNames.AUD,
+                    aud -> aud != null && aud.contains(audience)
+            ));
+        }
+
+        if (!validators.isEmpty()) {
+            decoder.setJwtValidator(new org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator<>(validators));
+        }
+        return decoder;
     }
 
     @Bean
@@ -55,6 +75,10 @@ public class PlatformSecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint(SecurityProblemSupport.authenticationEntryPoint())
+                        .accessDeniedHandler(SecurityProblemSupport.accessDeniedHandler())
+                )
                 .authorizeHttpRequests(auth -> auth
                         // Public actuator endpoints (liveness, readiness, prometheus)
                         .requestMatchers("/actuator/health/**", "/actuator/prometheus").permitAll()

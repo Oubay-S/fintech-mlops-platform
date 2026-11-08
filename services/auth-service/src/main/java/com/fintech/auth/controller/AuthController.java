@@ -31,6 +31,9 @@ public class AuthController {
     @Value("${app.security.cookie-secure:false}")
     private boolean cookieSecure;
 
+    @Value("${app.jwt.refresh-token-ttl-seconds:604800}")
+    private long refreshTokenTtlSeconds;
+
     /**
      * Determines whether X-Forwarded-For is trusted.
      * When false (default), the direct remote address is used to prevent attackers from
@@ -59,7 +62,7 @@ public class AuthController {
 
         LoginResult result = authService.login(request, ipAddress, userAgent);
 
-        ResponseCookie cookie = createRefreshTokenCookie(result.rawRefreshToken(), Duration.ofDays(7));
+        ResponseCookie cookie = createRefreshTokenCookie(result.rawRefreshToken(), Duration.ofSeconds(refreshTokenTtlSeconds));
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
@@ -76,7 +79,7 @@ public class AuthController {
 
         LoginResult result = authService.refreshToken(rawRefreshToken, ipAddress, userAgent);
 
-        ResponseCookie cookie = createRefreshTokenCookie(result.rawRefreshToken(), Duration.ofDays(7));
+        ResponseCookie cookie = createRefreshTokenCookie(result.rawRefreshToken(), Duration.ofSeconds(refreshTokenTtlSeconds));
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())

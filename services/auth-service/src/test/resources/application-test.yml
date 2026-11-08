@@ -23,6 +23,7 @@ app:
     lockout:
       max-failed-attempts: 5
       window-minutes: 15
+    cookie-secure: false
     service-token:
       enabled: false
 

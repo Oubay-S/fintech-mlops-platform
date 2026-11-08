@@ -33,6 +33,7 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final RefreshTokenService refreshTokenService;
     private final LoginAttemptRepository loginAttemptRepository;
     private final LoginAttemptService loginAttemptService;
     private final ServiceClientRepository serviceClientRepository;
@@ -52,6 +53,7 @@ public class AuthService {
     public AuthService(
             UserRepository userRepository,
             RefreshTokenRepository refreshTokenRepository,
+            RefreshTokenService refreshTokenService,
             LoginAttemptRepository loginAttemptRepository,
             LoginAttemptService loginAttemptService,
             ServiceClientRepository serviceClientRepository,
@@ -61,6 +63,7 @@ public class AuthService {
     ) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
+        this.refreshTokenService = refreshTokenService;
         this.loginAttemptRepository = loginAttemptRepository;
         this.loginAttemptService = loginAttemptService;
         this.serviceClientRepository = serviceClientRepository;
@@ -271,10 +274,10 @@ public class AuthService {
 
         RefreshToken token = tokenOpt.get();
 
-        // Reuse detection: If previously replaced or revoked, revoke entire user chain!
+        // Reuse detection: If previously replaced or revoked, revoke entire user chain in an isolated transaction!
         if (token.getReplacedBy() != null || token.isRevoked()) {
             log.error("ALERT: Reuse of revoked/replaced refresh token detected for user {}! Revoking all sessions.", token.getUser().getId());
-            refreshTokenRepository.revokeAllForUser(token.getUser(), Instant.now());
+            refreshTokenService.revokeAllForUser(token.getUser());
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "Token reuse detected. Session terminated.");
         }
 
