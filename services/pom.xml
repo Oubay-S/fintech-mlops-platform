@@ -21,6 +21,7 @@
 
     <modules>
         <module>platform-starter</module>
+        <module>auth-service</module>
     </modules>
 
     <properties>

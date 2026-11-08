@@ -1,0 +1,26 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:auth_db;DB_CLOSE_DELAY=-1;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    database-platform: org.hibernate.dialect.H2Dialect
+  flyway:
+    enabled: false
+
+app:
+  jwt:
+    issuer: fintech-auth-test
+    audience: fintech-platform-test
+    access-token-ttl-seconds: 60
+    refresh-token-ttl-seconds: 3600
+  security:
+    lockout:
+      max-failed-attempts: 5
+      window-minutes: 15
+    service-token:
+      enabled: false
+
