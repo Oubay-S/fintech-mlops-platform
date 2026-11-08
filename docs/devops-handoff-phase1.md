@@ -9,7 +9,7 @@
 
 ## 1. Container Build & Run Contract
 
-> **Important:** The Docker build context **must be the repository root (`.`)** so that `ml/serving/Dockerfile` can copy `ml/common/`, `ml/serving/`, and `docs/api/ml-predict-openapi.yaml`.
+> **Important:** The Docker build context **must be the repository root (`.`)** so that `ml/serving/Dockerfile` can copy `ml/common/`, `ml/pipeline/`, `ml/training/{results,package}/`, `ml/serving/`, and `docs/api/ml-predict-openapi.yaml`.
 
 ```bash
 # Build production image from repository root
@@ -66,9 +66,12 @@ docker run -d --name fintech-ml-serving \
 
 ## 4. Automated MLOps Pipeline Commands (For CI/CD & K8s Init/Seeder Job)
 
-When a new MLflow + PostgreSQL + MinIO stack starts (in CI or in a fresh Kubernetes cluster), the database is initially empty. Run the following 4 deterministic commands in order to seed the benchmark runs, validate the Quality Gate, and promote the Champion model to `@production`:
+When a new MLflow + PostgreSQL + MinIO stack starts (in CI or in a fresh Kubernetes cluster), the database is initially empty. Run the following deterministic commands in order to fetch the official release model artifact, seed the benchmark runs, validate the Quality Gate, and promote the Champion model to `@production`:
 
 ```bash
+# 0. Fetch and SHA-256 verify the latest official trained model release into ml/data/processed/
+python -m ml.pipeline.fetch_model
+
 # 1. Seed benchmark runs (lr, rf, svm, mlp) and register Champion XGBoost as @candidate
 python -m ml.pipeline.populate_mlflow --tracking-uri http://mlflow:5000
 

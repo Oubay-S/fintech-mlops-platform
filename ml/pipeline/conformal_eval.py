@@ -82,9 +82,14 @@ def evaluate_existing_thresholds_on_split(
 
     legit_mask = labels == 0
     fraud_mask = labels == 1
+    if not np.any(legit_mask) or not np.any(fraud_mask):
+        raise ValueError(
+            "Both legitimate (0) and fraud (1) samples must be present in y_true "
+            "to compute Mondrian class-conditional empirical coverage."
+        )
 
-    cov_legit = float(np.mean(include_legit[legit_mask])) if np.any(legit_mask) else 1.0
-    cov_fraud = float(np.mean(include_fraud[fraud_mask])) if np.any(fraud_mask) else 1.0
+    cov_legit = float(np.mean(include_legit[legit_mask]))
+    cov_fraud = float(np.mean(include_fraud[fraud_mask]))
     model_uncertain_rate = float(np.mean(set_sizes != 1))
 
     return {
