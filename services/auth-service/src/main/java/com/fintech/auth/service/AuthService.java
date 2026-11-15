@@ -118,7 +118,7 @@ public class AuthService {
 
         EventEnvelope<UserRegisteredEvent> envelope = new EventEnvelope<>(
                 UUID.randomUUID(),
-                "UserRegistered",
+                "auth.user.registered",
                 Instant.now(),
                 CorrelationContext.getCorrelationId(),
                 new EventEnvelope.Actor(user.getId(), "CUSTOMER"),
@@ -181,7 +181,7 @@ public class AuthService {
 
         EventEnvelope<UserRegisteredEvent> envelope = new EventEnvelope<>(
                 UUID.randomUUID(),
-                "UserRegistered",
+                "auth.user.registered",
                 Instant.now(),
                 CorrelationContext.getCorrelationId(),
                 new EventEnvelope.Actor(adminActorId, "ADMIN"),

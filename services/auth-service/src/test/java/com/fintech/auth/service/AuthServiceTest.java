@@ -95,7 +95,7 @@ class AuthServiceTest {
         assertThat(passwordEncoder.matches("Password123!", created.getPasswordHash())).isTrue();
 
         verify(outboxService, times(1)).enqueue(argThat(env ->
-                env.getType().equals("UserRegistered") &&
+                env.getType().equals("auth.user.registered") &&
                 "CUSTOMER".equals(env.getActor().getRole())
         ));
     }
