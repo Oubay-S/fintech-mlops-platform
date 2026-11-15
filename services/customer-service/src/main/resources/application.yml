@@ -1,0 +1,53 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: customer-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5433/fintech?currentSchema=customer}
+    username: ${SPRING_DATASOURCE_USERNAME:fintech_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:changeme_postgres}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: customer
+  flyway:
+    enabled: true
+    schemas: customer
+    default-schema: customer
+    baseline-on-migrate: true
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:guest}
+    password: ${SPRING_RABBITMQ_PASSWORD:guest}
+
+# Platform JWT Security configuration
+app:
+  jwt:
+    jwk-set-uri: ${APP_JWT_JWK_SET_URI:http://localhost:8081/.well-known/jwks.json}
+    issuer: ${APP_JWT_ISSUER:fintech-auth-service}
+    audience: ${APP_JWT_AUDIENCE:fintech-platform}
+  messaging:
+    exchange: fintech.events
+    queues:
+      customer-events: customer.events
+
+# Observability
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    tags:
+      service: ${spring.application.name}
+
