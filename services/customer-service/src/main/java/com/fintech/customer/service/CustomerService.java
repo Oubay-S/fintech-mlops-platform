@@ -22,13 +22,16 @@ import com.fintech.platform.outbox.EventEnvelope;
 import com.fintech.platform.outbox.OutboxService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 
@@ -39,10 +42,13 @@ public class CustomerService {
 
     private final CustomerRepository customerRepository;
     private final OutboxService outboxService;
+    private final CustomerProvisioningHelper provisioningHelper;
 
-    public CustomerService(CustomerRepository customerRepository, OutboxService outboxService) {
+    public CustomerService(CustomerRepository customerRepository, OutboxService outboxService,
+                           CustomerProvisioningHelper provisioningHelper) {
         this.customerRepository = customerRepository;
         this.outboxService = outboxService;
+        this.provisioningHelper = provisioningHelper;
     }
 
     @Transactional(readOnly = true)
@@ -116,11 +122,11 @@ public class CustomerService {
                 : receiver.getUsername();
         String maskedName = maskName(rawName);
 
-        // Emit audit event via transactional outbox
+        // Emit audit event via transactional outbox (hashed identifier to prevent PII exposure in outbox/broker)
         ReceiverLookedUpEvent auditData = new ReceiverLookedUpEvent(
                 callerId,
                 receiver.getUserId(),
-                identifier,
+                sha256Hex(identifier),
                 Instant.now()
         );
 
@@ -196,8 +202,11 @@ public class CustomerService {
 
     @Transactional
     public void provisionCustomer(UserRegisteredEvent event) {
-        if (customerRepository.existsById(event.userId())) {
-            log.info("Customer profile for user {} already exists, ignoring duplicate event", event.userId());
+        if (customerRepository.existsById(event.userId())
+                || customerRepository.findByEmailIgnoreCase(event.email()).isPresent()
+                || customerRepository.findByUsernameIgnoreCase(event.username()).isPresent()) {
+            log.info("Customer profile for user {} ({}) already exists, ignoring duplicate event",
+                    event.userId(), event.email());
             return;
         }
 
@@ -223,11 +232,9 @@ public class CustomerService {
                 kind
         );
 
-        try {
-            customerRepository.save(customer);
+        boolean created = provisioningHelper.saveIfAbsent(customer);
+        if (created) {
             log.info("Provisioned customer profile for user {} with kind {}", event.userId(), kind);
-        } catch (DataIntegrityViolationException ex) {
-            log.warn("Customer profile for user {} was created concurrently, ignoring duplicate insert", event.userId());
         }
     }
 
@@ -253,6 +260,23 @@ public class CustomerService {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * Computes deterministic SHA-256 hex hash of the lookup identifier.
+     * Prevents persisting raw PII (emails, phone numbers) in transactional outbox tables and event brokers.
+     */
+    public static String sha256Hex(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "";
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(raw.trim().toLowerCase().getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 algorithm not available", e);
+        }
     }
 }
 

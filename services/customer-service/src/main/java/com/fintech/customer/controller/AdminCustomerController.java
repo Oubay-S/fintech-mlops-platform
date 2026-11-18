@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
@@ -31,6 +32,9 @@ import java.util.UUID;
 public class AdminCustomerController {
 
     private final CustomerService customerService;
+
+    private static final Set<String> ALLOWED_SORT_FIELDS =
+            Set.of("createdAt", "updatedAt", "username", "email", "displayName", "accountStatus");
 
     public AdminCustomerController(CustomerService customerService) {
         this.customerService = customerService;
@@ -48,7 +52,8 @@ public class AdminCustomerController {
         int boundedPage = Math.max(0, page);
         int boundedSize = Math.min(100, Math.max(1, size));
         Sort.Direction sortDirection = "ASC".equalsIgnoreCase(direction) ? Sort.Direction.ASC : Sort.Direction.DESC;
-        PageRequest pageRequest = PageRequest.of(boundedPage, boundedSize, Sort.by(sortDirection, sortBy));
+        String safeSortBy = ALLOWED_SORT_FIELDS.contains(sortBy) ? sortBy : "createdAt";
+        PageRequest pageRequest = PageRequest.of(boundedPage, boundedSize, Sort.by(sortDirection, safeSortBy));
         return ResponseEntity.ok(customerService.listCustomers(search, pageRequest));
     }
 

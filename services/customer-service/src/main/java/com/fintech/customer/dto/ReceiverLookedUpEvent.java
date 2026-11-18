@@ -6,8 +6,7 @@ import java.util.UUID;
 public record ReceiverLookedUpEvent(
         UUID callerId,
         UUID receiverId,
-        String identifier,
+        String identifierHash,
         Instant occurredAt
 ) {
 }
-

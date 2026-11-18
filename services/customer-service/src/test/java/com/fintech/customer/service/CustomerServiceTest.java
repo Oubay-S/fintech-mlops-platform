@@ -8,6 +8,7 @@ import com.fintech.customer.dto.AgentResponse;
 import com.fintech.customer.dto.CustomerProfileResponse;
 import com.fintech.customer.dto.ReceiverLookupRequest;
 import com.fintech.customer.dto.ReceiverLookupResponse;
+import com.fintech.customer.dto.ReceiverLookedUpEvent;
 import com.fintech.customer.dto.UpdateProfileRequest;
 import com.fintech.customer.dto.UpdateStatusRequest;
 import com.fintech.customer.dto.UserRegisteredEvent;
@@ -50,6 +51,9 @@ class CustomerServiceTest {
 
     @Mock
     private OutboxService outboxService;
+
+    @Mock
+    private CustomerProvisioningHelper provisioningHelper;
 
     @InjectMocks
     private CustomerService customerService;
@@ -147,7 +151,13 @@ class CustomerServiceTest {
         assertThat(response.receiverId()).isEqualTo(bob.getUserId());
         // "Bob Builder" masked: B** B******
         assertThat(response.maskedName()).isEqualTo("B** B******");
-        verify(outboxService, times(1)).enqueue(any());
+
+        ArgumentCaptor<EventEnvelope> captor = ArgumentCaptor.forClass(EventEnvelope.class);
+        verify(outboxService, times(1)).enqueue(captor.capture());
+        assertThat(captor.getValue().getType()).isEqualTo("customer.receiver.lookedup");
+        ReceiverLookedUpEvent event = (ReceiverLookedUpEvent) captor.getValue().getData();
+        assertThat(event.identifierHash()).isNotEqualTo("bob@example.com");
+        assertThat(event.identifierHash()).isEqualTo(CustomerService.sha256Hex("bob@example.com"));
     }
 
     @Test
@@ -240,11 +250,12 @@ class CustomerServiceTest {
         );
 
         when(customerRepository.existsById(newUserId)).thenReturn(false);
+        when(provisioningHelper.saveIfAbsent(any(Customer.class))).thenReturn(true);
 
         customerService.provisionCustomer(event);
 
         ArgumentCaptor<Customer> captor = ArgumentCaptor.forClass(Customer.class);
-        verify(customerRepository, times(1)).save(captor.capture());
+        verify(provisioningHelper, times(1)).saveIfAbsent(captor.capture());
         Customer saved = captor.getValue();
         assertThat(saved.getUserId()).isEqualTo(newUserId);
         assertThat(saved.getEmail()).isEqualTo("charlie@example.com");
@@ -254,7 +265,7 @@ class CustomerServiceTest {
         // Second invocation: should be idempotent and not call save again
         when(customerRepository.existsById(newUserId)).thenReturn(true);
         customerService.provisionCustomer(event);
-        verify(customerRepository, times(1)).save(any());
+        verify(provisioningHelper, times(1)).saveIfAbsent(any());
     }
 
     @Test
@@ -265,6 +276,17 @@ class CustomerServiceTest {
         assertThat(CustomerService.maskName("Alice")).isEqualTo("A****");
         assertThat(CustomerService.maskName("")).isEqualTo("***");
         assertThat(CustomerService.maskName(null)).isEqualTo("***");
+    }
+
+    @Test
+    @DisplayName("sha256Hex correctly hashes normalized inputs")
+    void testSha256Hex() {
+        String hash1 = CustomerService.sha256Hex("Alice@Example.Com ");
+        String hash2 = CustomerService.sha256Hex("alice@example.com");
+        assertThat(hash1).isEqualTo(hash2);
+        assertThat(hash1).hasSize(64);
+        assertThat(CustomerService.sha256Hex(null)).isEmpty();
+        assertThat(CustomerService.sha256Hex("  ")).isEmpty();
     }
 }
 

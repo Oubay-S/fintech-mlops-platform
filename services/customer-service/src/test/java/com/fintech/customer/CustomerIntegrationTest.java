@@ -222,6 +222,16 @@ class CustomerIntegrationTest {
     }
 
     @Test
+    @DisplayName("Admin customer listing: invalid sortBy falls back safely to createdAt without 500 error")
+    void testAdminCustomerListingInvalidSortByFallback() throws Exception {
+        mockMvc.perform(get("/customers")
+                        .param("sortBy", "invalidFieldNonExistent")
+                        .with(adminJwt(adminId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(3));
+    }
+
+    @Test
     @DisplayName("PATCH /customers/{id}/status changes account status by ADMIN")
     void testAdminUpdateStatus() throws Exception {
         UpdateStatusRequest request = new UpdateStatusRequest(AccountStatus.BLOCKED, "Suspected fraud");
