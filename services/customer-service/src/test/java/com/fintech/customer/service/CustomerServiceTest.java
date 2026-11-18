@@ -14,6 +14,7 @@ import com.fintech.customer.dto.UserRegisteredEvent;
 import com.fintech.customer.repository.CustomerRepository;
 import com.fintech.platform.error.BusinessException;
 import com.fintech.platform.error.ErrorCode;
+import com.fintech.platform.outbox.EventEnvelope;
 import com.fintech.platform.outbox.OutboxService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -128,7 +129,9 @@ class CustomerServiceTest {
         );
 
         assertThat(response.displayName()).isEqualTo("Alice In Chains");
-        verify(outboxService, times(1)).enqueue(any());
+        ArgumentCaptor<EventEnvelope> captor = ArgumentCaptor.forClass(EventEnvelope.class);
+        verify(outboxService, times(1)).enqueue(captor.capture());
+        assertThat(captor.getValue().getType()).isEqualTo("customer.profile.updated");
     }
 
     @Test
@@ -216,7 +219,9 @@ class CustomerServiceTest {
         );
 
         assertThat(response.accountStatus()).isEqualTo(AccountStatus.BLOCKED);
-        verify(outboxService, times(1)).enqueue(any());
+        ArgumentCaptor<EventEnvelope> captor = ArgumentCaptor.forClass(EventEnvelope.class);
+        verify(outboxService, times(1)).enqueue(captor.capture());
+        assertThat(captor.getValue().getType()).isEqualTo("customer.account.status-changed");
     }
 
     @Test

@@ -290,4 +290,41 @@ class CustomerIntegrationTest {
         assertThat(david.getDisplayName()).isEqualTo("David Miller");
         assertThat(david.getAccountKind()).isEqualTo(AccountKind.PERSONAL);
     }
+
+    @Test
+    @DisplayName("GET /customers/me rejects non-CUSTOMER roles (e.g. SERVICE tokens) with 403")
+    void testGetOwnProfileRejectsServiceRole() throws Exception {
+        mockMvc.perform(get("/customers/me")
+                        .with(serviceJwt("risk-service")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("POST /internal/events rejects malformed event with 400")
+    void testInternalHttpEventIntakeMalformed() throws Exception {
+        String invalidEvent = """
+                {
+                  "type": "auth.user.registered",
+                  "data": null
+                }
+                """;
+
+        mockMvc.perform(post("/internal/events")
+                        .with(serviceJwt("auth-service"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(invalidEvent))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("PUT /customers/me rejects display name that trims below minimum length")
+    void testUpdateOwnProfileTrimmedTooShortFails() throws Exception {
+        UpdateProfileRequest request = new UpdateProfileRequest(" A ");
+
+        mockMvc.perform(put("/customers/me")
+                        .with(customerJwt(userAliceId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
+    }
 }
