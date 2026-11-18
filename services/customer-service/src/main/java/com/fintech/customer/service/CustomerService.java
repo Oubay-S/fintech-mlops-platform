@@ -22,6 +22,7 @@ import com.fintech.platform.outbox.EventEnvelope;
 import com.fintech.platform.outbox.OutboxService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -56,7 +57,12 @@ public class CustomerService {
         Customer customer = customerRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Customer profile not found for ID: " + userId));
 
-        customer.setDisplayName(request.displayName().trim());
+        String trimmedName = request.displayName() != null ? request.displayName().trim() : "";
+        if (trimmedName.length() < 2 || trimmedName.length() > 100) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "Display name must be between 2 and 100 characters");
+        }
+
+        customer.setDisplayName(trimmedName);
         Customer saved = customerRepository.save(customer);
 
         // Transactional Outbox Event for downstream services (e.g. Transaction updates wallet owner_display_name)
@@ -68,7 +74,7 @@ public class CustomerService {
 
         EventEnvelope<CustomerProfileUpdatedEvent> envelope = new EventEnvelope<>(
                 UUID.randomUUID(),
-                "CustomerProfileUpdated",
+                "customer.profile.updated",
                 Instant.now(),
                 CorrelationContext.getCorrelationId(),
                 new EventEnvelope.Actor(userId, "CUSTOMER"),
@@ -120,7 +126,7 @@ public class CustomerService {
 
         EventEnvelope<ReceiverLookedUpEvent> envelope = new EventEnvelope<>(
                 UUID.randomUUID(),
-                "ReceiverLookedUp",
+                "customer.receiver.lookedup",
                 Instant.now(),
                 CorrelationContext.getCorrelationId(),
                 new EventEnvelope.Actor(callerId, "CUSTOMER"),
@@ -175,7 +181,7 @@ public class CustomerService {
 
         EventEnvelope<AccountStatusChangedEvent> envelope = new EventEnvelope<>(
                 UUID.randomUUID(),
-                "AccountStatusChanged",
+                "customer.account.status-changed",
                 Instant.now(),
                 CorrelationContext.getCorrelationId(),
                 new EventEnvelope.Actor(adminId, "ADMIN"),
@@ -203,7 +209,7 @@ public class CustomerService {
         }
 
         String displayName = (event.displayName() != null && !event.displayName().isBlank())
-                ? event.displayName()
+                ? event.displayName().trim()
                 : event.username();
 
         Customer customer = new Customer(
@@ -217,8 +223,12 @@ public class CustomerService {
                 kind
         );
 
-        customerRepository.save(customer);
-        log.info("Provisioned customer profile for user {} with kind {}", event.userId(), kind);
+        try {
+            customerRepository.save(customer);
+            log.info("Provisioned customer profile for user {} with kind {}", event.userId(), kind);
+        } catch (DataIntegrityViolationException ex) {
+            log.warn("Customer profile for user {} was created concurrently, ignoring duplicate insert", event.userId());
+        }
     }
 
     /**

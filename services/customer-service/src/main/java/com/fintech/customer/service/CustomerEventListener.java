@@ -28,9 +28,10 @@ public class CustomerEventListener {
 
     @RabbitListener(queues = "${app.messaging.queues.customer-events:customer.events}")
     public void onMessage(String messagePayload) {
+        String eventType = "unknown";
         try {
             JsonNode root = objectMapper.readTree(messagePayload);
-            String eventType = root.path("type").asText();
+            eventType = root.path("type").asText("unknown");
 
             if ("auth.user.registered".equalsIgnoreCase(eventType)) {
                 JsonNode dataNode = root.path("data");
@@ -42,7 +43,7 @@ public class CustomerEventListener {
                 log.debug("CustomerEventListener ignoring unhandled event type: {}", eventType);
             }
         } catch (Exception e) {
-            log.error("Failed to process AMQP message payload: {}", messagePayload, e);
+            log.error("Failed to process AMQP message for event type [{}]: {}", eventType, e.getMessage());
             throw new RuntimeException("Error processing event message", e);
         }
     }

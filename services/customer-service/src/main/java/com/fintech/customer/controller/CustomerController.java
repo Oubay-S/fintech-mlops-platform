@@ -36,6 +36,7 @@ public class CustomerController {
     }
 
     @GetMapping("/me")
+    @PreAuthorize("hasRole('CUSTOMER')")
     @Operation(summary = "Get own profile", description = "Retrieves the currently authenticated customer's profile")
     public ResponseEntity<CustomerProfileResponse> getMyProfile() {
         UUID currentUserId = SecurityUtils.getAuthenticatedUserId();
@@ -46,6 +47,7 @@ public class CustomerController {
     }
 
     @PutMapping("/me")
+    @PreAuthorize("hasRole('CUSTOMER')")
     @Operation(summary = "Update display name", description = "Updates own display name and emits CustomerProfileUpdated outbox event")
     public ResponseEntity<CustomerProfileResponse> updateMyProfile(@Valid @RequestBody UpdateProfileRequest request) {
         UUID currentUserId = SecurityUtils.getAuthenticatedUserId();
