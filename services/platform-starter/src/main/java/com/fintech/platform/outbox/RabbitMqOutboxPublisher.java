@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
  * Routing key format: <service>.<resource>.<event> (e.g. "transaction.transfer.completed")
  */
 @Component
+@org.springframework.context.annotation.Primary
 @ConditionalOnClass(AmqpTemplate.class)
 @ConditionalOnProperty(name = "app.outbox.publisher", havingValue = "rabbitmq", matchIfMissing = true)
 public class RabbitMqOutboxPublisher implements OutboxPublisher {

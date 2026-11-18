@@ -15,6 +15,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -32,6 +34,12 @@ class AuthIntegrationTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private com.fintech.auth.security.JwtService jwtService;
+
+    @Autowired
+    private com.fintech.auth.repository.UserRepository userRepository;
 
     @Test
     @DisplayName("Full Auth lifecycle: JWKS, Register, Login, Refresh, Logout, and Duplicate prevention")
@@ -115,6 +123,62 @@ class AuthIntegrationTest {
                         .cookie(freshCookie))
                 .andExpect(status().isOk())
                 .andExpect(cookie().maxAge("refresh_token", 0));
+    }
+
+    @Test
+    @DisplayName("Account status changed event disables user and prevents login")
+    void testAccountStatusChangedDisablesUser() throws Exception {
+        // 1. Register user
+        RegisterRequest registerReq = new RegisterRequest(
+                "charlie@example.com",
+                "charlie",
+                "+212600000088",
+                "Password123!",
+                AccountKind.PERSONAL,
+                "Charlie Brown"
+        );
+        mockMvc.perform(post("/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(registerReq)))
+                .andExpect(status().isCreated());
+
+        // 2. Verify user can login
+        LoginRequest loginReq = new LoginRequest("charlie", "Password123!");
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(loginReq)))
+                .andExpect(status().isOk());
+
+        // 3. Obtain user ID
+        UUID userId = userRepository.findByUsername("charlie").orElseThrow().getId();
+
+        // 4. Emit account status changed HTTP event with SERVICE authority
+        String serviceToken = jwtService.issueServiceToken("customer-service", "SERVICE");
+        String eventPayload = """
+                {
+                    "id": "%s",
+                    "type": "customer.account.status-changed",
+                    "data": {
+                        "userId": "%s",
+                        "previousStatus": "ACTIVE",
+                        "newStatus": "BLOCKED",
+                        "reason": "Suspected AML violation"
+                    }
+                }
+                """.formatted(UUID.randomUUID(), userId);
+
+        mockMvc.perform(post("/internal/auth/events")
+                        .header("Authorization", "Bearer " + serviceToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(eventPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PROCESSED"));
+
+        // 5. Subsequent login must fail with 401 Unauthorized (Account is disabled)
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(loginReq)))
+                .andExpect(status().isUnauthorized());
     }
 }
 
