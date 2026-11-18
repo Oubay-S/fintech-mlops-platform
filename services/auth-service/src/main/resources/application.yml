@@ -40,6 +40,10 @@ app:
     trust-proxy-headers: false # Set to true only behind trusted reverse proxies/ingress to prevent X-Forwarded-For spoofing
     service-token:
       enabled: false # auth-service issues tokens, doesn't need to consume internal tokens for itself
+  messaging:
+    exchange: fintech.events
+    queues:
+      auth-events: auth.events
 
 # Observability
 management:

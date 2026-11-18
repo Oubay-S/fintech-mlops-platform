@@ -367,6 +367,33 @@ public class AuthService {
         return ServiceTokenResponse.of(token, 300);
     }
 
+    /**
+     * Updates user enabled flag based on customer account status changes.
+     * When an account is BLOCKED or SUSPENDED, enabled is set to false and all active sessions are revoked.
+     * When ACTIVE, enabled is restored to true.
+     */
+    @Transactional
+    public void handleAccountStatusChanged(UUID userId, String newStatus, String reason) {
+        Optional<User> userOpt = userRepository.findById(userId);
+        if (userOpt.isEmpty()) {
+            log.warn("AccountStatusChanged event received for unknown user ID: {}", userId);
+            return;
+        }
+
+        User user = userOpt.get();
+        boolean shouldEnable = "ACTIVE".equalsIgnoreCase(newStatus);
+        user.setEnabled(shouldEnable);
+        userRepository.save(user);
+
+        if (!shouldEnable) {
+            log.info("User {} disabled due to status change to {} (reason: {}). Revoking all active refresh tokens.",
+                    userId, newStatus, reason);
+            refreshTokenRepository.revokeAllForUser(user, Instant.now());
+        } else {
+            log.info("User {} re-enabled due to status change to {}", userId, newStatus);
+        }
+    }
+
     private Optional<User> findByIdentifier(String identifier) {
         Optional<User> byEmail = userRepository.findByEmail(identifier);
         if (byEmail.isPresent()) return byEmail;
