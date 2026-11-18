@@ -45,8 +45,10 @@ public class AdminCustomerController {
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "DESC") String direction
     ) {
+        int boundedPage = Math.max(0, page);
+        int boundedSize = Math.min(100, Math.max(1, size));
         Sort.Direction sortDirection = "ASC".equalsIgnoreCase(direction) ? Sort.Direction.ASC : Sort.Direction.DESC;
-        PageRequest pageRequest = PageRequest.of(page, size, Sort.by(sortDirection, sortBy));
+        PageRequest pageRequest = PageRequest.of(boundedPage, boundedSize, Sort.by(sortDirection, sortBy));
         return ResponseEntity.ok(customerService.listCustomers(search, pageRequest));
     }
 

@@ -5,6 +5,8 @@ import com.fintech.customer.dto.CustomerProfileResponse;
 import com.fintech.customer.dto.UserRegisteredEvent;
 import com.fintech.customer.service.CustomerEventListener;
 import com.fintech.customer.service.CustomerService;
+import com.fintech.platform.error.BusinessException;
+import com.fintech.platform.error.ErrorCode;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
@@ -54,6 +56,8 @@ public class InternalCustomerController {
             UserRegisteredEvent event = customerEventListener.parseUserRegisteredEvent(dataNode);
             if (event != null) {
                 customerService.provisionCustomer(event);
+            } else {
+                throw new BusinessException(ErrorCode.VALIDATION_FAILED, "Invalid or missing payload data for auth.user.registered event");
             }
         }
 
