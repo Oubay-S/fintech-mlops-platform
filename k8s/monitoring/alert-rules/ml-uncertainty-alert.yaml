@@ -1,0 +1,94 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: fintech-ml-serving-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: ml-serving
+    app.kubernetes.io/part-of: fintech-mlops-platform
+    release: kube-prometheus-stack
+    role: ml-serving
+spec:
+  groups:
+    - name: fintech.ml.serving.rules
+      interval: 30s
+      rules:
+        - alert: HighMLUncertaintyRate
+          expr: |
+            (
+              sum(rate(ml_predictions_total{action="HUMAN_REVIEW"}[5m]))
+              /
+              clamp_min(sum(rate(ml_predictions_total[5m])), 1e-9)
+            ) > 0.25
+            and
+            sum(increase(ml_predictions_total[5m])) >= 10
+          for: 5m
+          labels:
+            severity: warning
+            service: ml-serving
+            category: ml-uncertainty
+          annotations:
+            summary: "High ML uncertainty rate (> 25% HUMAN_REVIEW / PENDING_REVIEW)"
+            description: >-
+              The proportion of fraud scoring decisions routed to HUMAN_REVIEW (PENDING_REVIEW)
+              has exceeded 25% over the last 5 minutes (current value: {{ $value | humanizePercentage }}).
+              This indicates potential data drift, a novel fraud pattern, or broken upstream preprocessing.
+            runbook_url: "docs/mlops-serving-runbook.md"
+
+        - alert: MLInferenceLatencyHigh
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum(rate(ml_inference_duration_seconds_bucket[5m])) by (le)
+            ) > 0.3
+            and
+            sum(increase(ml_inference_duration_seconds_count[5m])) >= 10
+          for: 5m
+          labels:
+            severity: warning
+            service: ml-serving
+            category: ml-performance
+          annotations:
+            summary: "ML Serving p95 inference latency exceeds 300ms budget"
+            description: >-
+              Model inference p95 latency has been above 300ms for 5 minutes
+              (current value: {{ $value | humanizeDuration }}). Check CPU saturation,
+              HPA scaling status, and batch/feature payload sizes.
+            runbook_url: "docs/mlops-serving-runbook.md"
+
+        - alert: MLServingErrorRateHigh
+          expr: |
+            (
+              sum(rate(ml_http_requests_total{route="/predict",status=~"5.."}[5m]))
+              /
+              clamp_min(sum(rate(ml_http_requests_total{route="/predict"}[5m])), 1e-9)
+            ) > 0.05
+            and
+            sum(increase(ml_http_requests_total{route="/predict"}[5m])) >= 10
+          for: 5m
+          labels:
+            severity: critical
+            service: ml-serving
+            category: availability
+          annotations:
+            summary: "ML Serving /predict 5xx error rate exceeds 5%"
+            description: >-
+              More than 5% of POST /predict requests are returning HTTP 5xx errors
+              over the last 5 minutes (current rate: {{ $value | humanizePercentage }}).
+              Risk Service may be tripping its Rule R2 circuit breaker (degraded=true).
+            runbook_url: "docs/mlops-serving-runbook.md"
+
+        - alert: MLServingModelNotReady
+          expr: ml_ready == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: ml-serving
+            category: availability
+          annotations:
+            summary: "ML Serving pod has no loaded @production model (ml_ready == 0)"
+            description: >-
+              An ml-serving instance has reported ml_ready == 0 for at least 2 minutes.
+              Verify MLflow Registry connectivity, MinIO S3 artifact store, and the
+              @production alias on registered model 'fraud-detector'.
+            runbook_url: "docs/mlops-serving-runbook.md"
