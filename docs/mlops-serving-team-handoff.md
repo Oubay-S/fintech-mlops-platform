@@ -7,7 +7,7 @@
 - **Role 3 (DevOps & Cloud Infrastructure):** Docker Compose, CI/CD pipelines, Kubernetes manifests, K8s Seeder Job, and Prometheus/Grafana observability
 - **Role 4 (Data Scientist):** Certified 6/6 Golden Parity verification (`max |Δ| = 0.0`) and Phase 9 Locust load-testing orientation
 
-**Status:** Production-Ready · All 5 Integration Phases Verified · 74/74 Automated Tests Passing
+**Status:** Production-Ready · All 5 Integration Phases Verified · 80/80 Automated Tests Passing
 
 ---
 
@@ -242,7 +242,7 @@ The serving container is ready for Phase 9 Locust load testing (`ml/load-tests/`
 ```mermaid
 flowchart TD
     subgraph CI ["1. GitHub Actions CI (Pull Request — Ephemeral VM)"]
-        CI1["Run ruff & pytest ml/ (74 unit/integration tests)"]
+        CI1["Run ruff & pytest ml/ (80 unit/integration tests)"]
         CI2["Optional: Start ephemeral compose stack in runner"]
         CI3["Run populate_mlflow -> validate_gate -> promote_model"]
         CI4["Destroy VM after job completes (Proves code & gate validity)"]
@@ -259,7 +259,7 @@ flowchart TD
 ```
 
 ### 6.2 GitHub Actions CI Integration Snippet
-In `.github/workflows/ci.yml`, the `ml-services` job runs `pytest ml/ -v` (which executes all 74 tests across `ml/training/tests`, `ml/pipeline/tests`, and `ml/serving/tests`). To also run an end-to-end MLOps Quality Gate check in CI:
+In `.github/workflows/ci.yml`, the `ml-services` job runs `pytest ml/ -v` (which collects all 80 tests across `ml/training/tests`, `ml/pipeline/tests`, and `ml/serving/tests`). To also run an end-to-end MLOps Quality Gate check in CI:
 
 ```yaml
       - name: Run MLOps Smoke Pipeline & Quality Gate Check
@@ -329,6 +329,10 @@ Configure Prometheus to scrape `http://fintech-ml-serving:8000/metrics` every `1
 | `ml_model_info` | Gauge | `model_name`, `version`, `stage`, `alias` | Constant `1` gauge identifying the currently active model in memory |
 | `ml_inference_duration_seconds` | Histogram | `model_version` | Pure ML + conformal scoring latency |
 | `ml_predictions_total` | Counter | `action`, `prediction_set`, `model_version` | Predictions broken down by `ALLOW`, `BLOCK`, `HUMAN_REVIEW` and set composition |
-| `ml_human_review_requests_total` | Counter | `reason`, `model_version` | `HUMAN_REVIEW` triggers (`empty_set`, `ambiguous_set`, `high_uncertainty_score`) |
+| `ml_human_review_requests_total` | Counter | `reason`, `model_version` | `HUMAN_REVIEW` triggers (`empty_set`, `ambiguous_set`, `high_score`) |
 | `ml_prediction_set_size` | Histogram | `model_version` | Distribution of conformal prediction set sizes $|\Gamma(x)| \in \{0, 1, 2\}$ |
 | `ml_uncertainty_score` | Histogram | `model_version` | Distribution of conformal uncertainty scores $\in [0, 1]$ |
+
+#### C. Ready-to-Deploy Grafana Dashboard & Prometheus Alert Rules (`k8s/monitoring/`)
+- **Grafana Dashboard JSON (Issue #32):** [`k8s/monitoring/dashboards/ml-serving.json`](k8s/monitoring/dashboards/ml-serving.json) (`uid: fintech-ml-serving`) — ready to import or mount via `kube-prometheus-stack` Grafana sidecar ConfigMap.
+- **PrometheusRule Manifest (Issue #33):** [`k8s/monitoring/alert-rules/ml-uncertainty-alert.yaml`](k8s/monitoring/alert-rules/ml-uncertainty-alert.yaml) — defines `HighMLUncertaintyRate` (`> 25%` `HUMAN_REVIEW` over `5m`, `warning`), `MLInferenceLatencyHigh` (`p95 > 300ms`), `MLServingErrorRateHigh` (`5xx > 5%`), and `MLServingModelNotReady` (`ml_ready == 0`).
