@@ -1,0 +1,11 @@
+# Build context is `services/` — keep images small and cache-friendly.
+**/target/
+**/*.class
+**/*.jar
+**/*.war
+.git/
+.gitignore
+.idea/
+.vscode/
+*.iml
+*.log

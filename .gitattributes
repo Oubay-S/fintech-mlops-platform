@@ -18,6 +18,8 @@
 *.html text eol=lf
 Makefile text eol=lf
 Dockerfile text eol=lf
+.dockerignore text eol=lf
+*.dockerignore text eol=lf
 
 # Binary files
 *.png binary
