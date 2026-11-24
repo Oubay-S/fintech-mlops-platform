@@ -12,6 +12,10 @@ spring:
         default_schema: auth
   flyway:
     enabled: false
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: false
 
 app:
   jwt:
@@ -19,6 +23,10 @@ app:
     audience: fintech-platform-test
     access-token-ttl-seconds: 60
     refresh-token-ttl-seconds: 3600
+  messaging:
+    exchange: fintech.events
+    queues:
+      auth-events: auth.events
   security:
     lockout:
       max-failed-attempts: 5

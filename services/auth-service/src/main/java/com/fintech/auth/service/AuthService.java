@@ -118,7 +118,7 @@ public class AuthService {
 
         EventEnvelope<UserRegisteredEvent> envelope = new EventEnvelope<>(
                 UUID.randomUUID(),
-                "UserRegistered",
+                "auth.user.registered",
                 Instant.now(),
                 CorrelationContext.getCorrelationId(),
                 new EventEnvelope.Actor(user.getId(), "CUSTOMER"),
@@ -181,7 +181,7 @@ public class AuthService {
 
         EventEnvelope<UserRegisteredEvent> envelope = new EventEnvelope<>(
                 UUID.randomUUID(),
-                "UserRegistered",
+                "auth.user.registered",
                 Instant.now(),
                 CorrelationContext.getCorrelationId(),
                 new EventEnvelope.Actor(adminActorId, "ADMIN"),
@@ -365,6 +365,33 @@ public class AuthService {
         // Always issue SERVICE role — never copy the DB column into the token to prevent elevation
         String token = jwtService.issueServiceToken(client.getClientId(), "SERVICE");
         return ServiceTokenResponse.of(token, 300);
+    }
+
+    /**
+     * Updates user enabled flag based on customer account status changes.
+     * When an account is BLOCKED or SUSPENDED, enabled is set to false and all active sessions are revoked.
+     * When ACTIVE, enabled is restored to true.
+     */
+    @Transactional
+    public void handleAccountStatusChanged(UUID userId, String newStatus, String reason) {
+        Optional<User> userOpt = userRepository.findById(userId);
+        if (userOpt.isEmpty()) {
+            log.warn("AccountStatusChanged event received for unknown user ID: {}", userId);
+            return;
+        }
+
+        User user = userOpt.get();
+        boolean shouldEnable = "ACTIVE".equalsIgnoreCase(newStatus);
+        user.setEnabled(shouldEnable);
+        userRepository.save(user);
+
+        if (!shouldEnable) {
+            log.info("User {} disabled due to status change to {} (reason: {}). Revoking all active refresh tokens.",
+                    userId, newStatus, reason);
+            refreshTokenRepository.revokeAllForUser(user, Instant.now());
+        } else {
+            log.info("User {} re-enabled due to status change to {}", userId, newStatus);
+        }
     }
 
     private Optional<User> findByIdentifier(String identifier) {

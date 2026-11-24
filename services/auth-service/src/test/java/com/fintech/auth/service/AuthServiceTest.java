@@ -95,7 +95,7 @@ class AuthServiceTest {
         assertThat(passwordEncoder.matches("Password123!", created.getPasswordHash())).isTrue();
 
         verify(outboxService, times(1)).enqueue(argThat(env ->
-                env.getType().equals("UserRegistered") &&
+                env.getType().equals("auth.user.registered") &&
                 "CUSTOMER".equals(env.getActor().getRole())
         ));
     }
@@ -142,6 +142,54 @@ class AuthServiceTest {
 
         verify(loginAttemptService, times(1)).recordAttempt(eq("johndoe"), eq("127.0.0.1"), eq(true), isNull());
         verify(refreshTokenRepository, times(1)).save(any());
+    }
+
+    @Test
+    @DisplayName("handleAccountStatusChanged with BLOCKED disables user and revokes all refresh tokens")
+    void testHandleAccountStatusChangedBlocked() {
+        UUID userId = UUID.randomUUID();
+        User user = new User(
+                userId,
+                "target@example.com",
+                "targetuser",
+                "+123456789",
+                "hashed",
+                Role.CUSTOMER,
+                AccountKind.PERSONAL
+        );
+        user.setEnabled(true);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        authService.handleAccountStatusChanged(userId, "BLOCKED", "Suspected fraud");
+
+        assertThat(user.isEnabled()).isFalse();
+        verify(userRepository, times(1)).save(user);
+        verify(refreshTokenRepository, times(1)).revokeAllForUser(eq(user), any(Instant.class));
+    }
+
+    @Test
+    @DisplayName("handleAccountStatusChanged with ACTIVE re-enables user without revoking tokens")
+    void testHandleAccountStatusChangedActive() {
+        UUID userId = UUID.randomUUID();
+        User user = new User(
+                userId,
+                "target@example.com",
+                "targetuser",
+                "+123456789",
+                "hashed",
+                Role.CUSTOMER,
+                AccountKind.PERSONAL
+        );
+        user.setEnabled(false);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        authService.handleAccountStatusChanged(userId, "ACTIVE", "Unblocked by admin");
+
+        assertThat(user.isEnabled()).isTrue();
+        verify(userRepository, times(1)).save(user);
+        verify(refreshTokenRepository, never()).revokeAllForUser(any(), any());
     }
 }
 
