@@ -7,7 +7,7 @@
 - **Role 3 (DevOps & Cloud Infrastructure):** Docker Compose, CI/CD pipelines, Kubernetes manifests, K8s Seeder Job, and Prometheus/Grafana observability
 - **Role 4 (Data Scientist):** Certified 6/6 Golden Parity verification (`max |Δ| = 0.0`) and Phase 9 Locust load-testing orientation
 
-**Status:** Production-Ready · All 5 Integration Phases Verified · 80/80 Automated Tests Passing
+**Status:** Production-Ready · All 5 Integration Phases Verified · 80 tests collected (79 passed, 1 skipped in CI — real-artifact parity requires `python -m ml.pipeline.fetch_model`)
 
 ---
 
